@@ -361,6 +361,7 @@ function renderStudio() {
   setupWaveTiles(p, scale);
   fracEls = [...document.querySelectorAll('#tracks .lane'), $('#ruler')];
   fracNow = 0;
+  if (engine.playing && playBase !== null) { const f = playBase - engine.visualPosition() * scale; fracNow = NaN; setFrac(f); }
   layoutPlayhead();
   renderEditBar();
   updatePlayhead();
@@ -501,20 +502,31 @@ function updatePlayhead(follow = false, pos = engine.position) {
   const txt = `${String(m).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')}<small>.${Math.floor((sec % 1) * 10)}</small>`;
   if (txt !== lastTimeText) { $('#t-now').innerHTML = txt; lastTimeText = txt; }
   if (follow) {
-    // Desplazamiento sub-píxel: la parte entera la mueve el scroll y la fracción una transformación,
-    // así la canción corre perfectamente suave aunque el scroll solo avance en píxeles enteros.
-    const x = pos * pps(), ix = Math.floor(x);
-    setScroll(ix);
-    const frac = $('#timeline').scrollLeft - x;
-    setFrac(Math.abs(frac) < 1.5 ? frac : 0);
+    const x = pos * pps();
+    if (engine.playing) {
+      // Mientras suena, la canción se desliza con la tarjeta gráfica (transform), sin tocar el scroll:
+      // es más fluido y funciona igual en todos los celulares. La línea blanca no se mueve nunca.
+      if (playBase === null) playBase = $('#timeline').scrollLeft;
+      setFrac(playBase - x);
+    } else {
+      setFrac(0);
+      setScroll(x);
+    }
   }
 }
+let playBase = null; // posición del scroll cuando empezó a sonar
 let fracEls = [], fracNow = 0;
 function setFrac(f) {
-  if (Math.abs(f - fracNow) < 0.01) return;
+  if (Math.abs(f - fracNow) < 0.005) return;
   fracNow = f;
-  const v = f ? `translate3d(${f.toFixed(3)}px,0,0)` : '';
+  const v = f ? `translate3d(${f.toFixed(2)}px,0,0)` : '';
   fracEls.forEach((el) => { el.style.transform = v; });
+}
+/** Pasa lo que avanzó la canción al scroll real (al pausar, hacer zoom, etc.). */
+function settleScroll(pos = engine.position) {
+  playBase = null;
+  setFrac(0);
+  setScroll(pos * pps());
 }
 function setScroll(x) {
   const tl = $('#timeline');
@@ -541,14 +553,16 @@ function tick() {
 function startPlayback() {
   engine.ensure();
   engine.setMasterVolume(S.project.masterVolume ?? 1);
+  settleScroll(engine.position);
+  playBase = $('#timeline').scrollLeft;
   engine.play(S.project, engine.position);
   $('#play-icon').setAttribute('href', '#ic-pause');
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(tick);
 }
 function stopPlayback() {
-  engine.stop();
-  setFrac(0);
+  const pos = engine.stop();
+  settleScroll(pos);
   $('#play-icon').setAttribute('href', '#ic-play');
   cancelAnimationFrame(raf);
   updatePlayhead();
@@ -581,8 +595,10 @@ document.addEventListener('keydown', (e) => {
 function zoomAround(newPps) {
   const pos = engine.position;
   S.pps = clamp(newPps, MIN_PPS, MAX_PPS);
+  playBase = null;
   renderStudio();
-  setScroll(pos * S.pps);
+  settleScroll(pos);
+  if (engine.playing) playBase = $('#timeline').scrollLeft - (engine.visualPosition() - pos) * S.pps;
   updatePlayhead();
 }
 
@@ -623,8 +639,9 @@ let pinch = null;
     targets.forEach((el) => { el.style.transform = ''; el.style.willChange = ''; });
     targets = [];
     S.pps = clamp(p0 * k, MIN_PPS, MAX_PPS);
+    playBase = null;
     renderStudio();
-    setScroll(pos * S.pps);
+    settleScroll(pos);
   };
   tl.addEventListener('touchend', end);
   tl.addEventListener('touchcancel', end);
@@ -667,7 +684,7 @@ let pinch = null;
     if (resumeAfter && !touching) scheduleResume();
   }, { passive: true });
 })();
-window.addEventListener('resize', () => { if (S.project) { renderStudio(); setScroll(engine.position * pps()); } });
+window.addEventListener('resize', () => { if (S.project && !engine.playing) { renderStudio(); settleScroll(); } });
 new ResizeObserver(() => { if (S.project) layoutPlayhead(); }).observe(document.querySelector('.tl-wrap'));
 
 
