@@ -1,0 +1,14 @@
+{
+  "name": "Arcadia",
+  "short_name": "Arcadia",
+  "description": "Estudio musical multipista de Abraham",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0E0E12",
+  "theme_color": "#0E0E12",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
