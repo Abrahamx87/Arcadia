@@ -6,8 +6,7 @@ import { EFFECTS, PRESETS, defaultParams } from './effects.js';
 // =====================================================================
 // Constantes y utilidades
 // =====================================================================
-const HEADER_W = 132;
-const ZOOMS = [8, 12, 20, 30, 40, 60, 90, 130, 200];
+const MIN_PPS = 6, MAX_PPS = 320; // zoom: píxeles por segundo
 const COLORS = ['#FF4D6D', '#FFB020', '#4DD68A', '#3DB8FF', '#B26BFF', '#FF7A3D',
   '#2EE6D0', '#FF5CC8', '#C6F432', '#7C8CFF', '#FFD84D', '#FF8FA3'];
 const TYPES = {
@@ -46,14 +45,15 @@ const S = {
   filter: 'mine',
   project: null,
   sel: { trackId: null, regionId: null },
-  zoom: 4,
+  pps: 40,
   undo: [],
   redo: [],
   recording: null,
   settings: loadSettings(),
 };
 engine.metronome = S.settings.metronome;
-const pps = () => ZOOMS[S.zoom];
+const pps = () => S.pps;
+const headerW = () => (S.settings.collapsed ? 52 : 132);
 
 // ---------- Modelos ----------
 function nextColor(project) {
@@ -320,12 +320,10 @@ function renderStudio() {
   $('#studio-sub').textContent = `${p.tracks.length} pistas · ${p.bpm} BPM`;
   $('#bpm-label').textContent = `${p.bpm} BPM`;
   $('#t-total').textContent = '/ ' + fmtTime(Math.max(projectEnd(p), 0));
-  $('#tl-inner').style.width = HEADER_W + width + 'px';
+  $('#tl-inner').style.width = headerW() + width + 'px';
   drawRuler(p, width, scale);
 
-  const beatPx = (60 / p.bpm) * scale, barPx = beatPx * 4;
-  const grid = `repeating-linear-gradient(90deg, var(--grid-bar) 0 1px, transparent 1px ${barPx}px)` +
-    (beatPx > 14 ? `, repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px ${beatPx}px)` : '');
+  const grid = gridBg(p, scale);
   const anySolo = p.tracks.some((t) => t.solo);
   const rows = p.tracks.map((t, i) => {
     const dim = t.muted || (anySolo && !t.solo);
@@ -341,6 +339,7 @@ function renderStudio() {
         <div class="stripe" style="background:${t.color}"></div>
         <div class="body">
           <div class="tname" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}<span style="color:var(--text)">${esc(t.name)}</span></div>
+          <div class="mstate">${t.muted ? '<i style="background:var(--mute)"></i>' : ''}${t.solo ? '<i style="background:var(--solo)"></i>' : ''}</div>
           <div class="toggles">
             <button class="toggle m ${t.muted ? 'on' : ''}" data-mute="${t.id}">M</button>
             <button class="toggle s ${t.solo ? 'on' : ''}" data-solo="${t.id}">S</button>
@@ -365,6 +364,12 @@ function renderStudio() {
   renderEditBar();
   updatePlayhead();
   updateUndoButtons();
+}
+
+function gridBg(p, scale) {
+  const beatPx = (60 / p.bpm) * scale, barPx = beatPx * 4;
+  return `repeating-linear-gradient(90deg, var(--grid-bar) 0 1px, transparent 1px ${barPx}px)` +
+    (beatPx > 14 ? `, repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px ${beatPx}px)` : '');
 }
 
 function drawWave(canvas, r) {
@@ -440,12 +445,12 @@ let raf = null;
 function updatePlayhead(follow = false) {
   const pos = engine.position;
   const x = pos * pps();
-  $('#playhead').style.transform = `translateX(${HEADER_W + x}px)`;
+  $('#playhead').style.transform = `translateX(${headerW() + x}px)`;
   $('#ph-tri').style.transform = `translateX(${x}px)`;
   $('#t-now').textContent = fmtTime(pos);
   if (follow) {
     const tl = $('#timeline');
-    const visible = tl.clientWidth - HEADER_W;
+    const visible = tl.clientWidth - headerW();
     const rel = x - tl.scrollLeft;
     if (rel > visible * 0.85 || rel < 0) tl.scrollLeft = Math.max(0, x - visible * 0.15);
   }
@@ -456,7 +461,7 @@ function tick() {
   if (S.recording) {
     const rr = $('#rec-region');
     if (rr) rr.style.width = Math.max(0, (engine.position - S.recording.start) * pps()) + 'px';
-    if (engine.position * pps() > parseFloat($('#tl-inner').style.width) - HEADER_W - 200) renderStudio();
+    if (engine.position * pps() > parseFloat($('#tl-inner').style.width) - headerW() - 200) renderStudio();
   } else if (engine.position > timelineLength()) {
     stopPlayback();
   }
@@ -499,17 +504,97 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
 });
 
-// ---------- Zoom ----------
-function setZoom(z) {
-  const tl = $('#timeline');
-  const visible = tl.clientWidth - HEADER_W;
-  const centerSec = (tl.scrollLeft + visible / 2) / pps();
-  S.zoom = clamp(z, 0, ZOOMS.length - 1);
-  renderStudio();
-  tl.scrollLeft = Math.max(0, centerSec * pps() - visible / 2);
+// ---------- Zoom: botones + pellizco con dos dedos (como en BandLab) ----------
+/** Cambio rápido de zoom sin redibujar todo: solo mueve y estira lo que ya existe. */
+function layoutZoom() {
+  const p = S.project, scale = pps();
+  const width = Math.ceil(timelineLength() * scale);
+  $('#tl-inner').style.width = headerW() + width + 'px';
+  drawRuler(p, width, scale);
+  const grid = gridBg(p, scale);
+  document.querySelectorAll('#tracks .lane').forEach((l) => { l.style.width = width + 'px'; l.style.backgroundImage = grid; });
+  p.tracks.forEach((t) => t.regions.forEach((r) => {
+    const el = document.querySelector(`[data-region="${r.id}"]`);
+    if (el) { el.style.left = r.start * scale + 'px'; el.style.width = Math.max(4, r.length * scale) + 'px'; }
+  }));
+  updatePlayhead();
 }
-$('#zoom-in').addEventListener('click', () => setZoom(S.zoom + 1));
-$('#zoom-out').addEventListener('click', () => setZoom(S.zoom - 1));
+/** Zoom manteniendo fijo el momento de la canción que está bajo el dedo. */
+function zoomAround(newPps, clientX, full) {
+  const tl = $('#timeline');
+  const offset = clientX - tl.getBoundingClientRect().left - headerW();
+  const t = (tl.scrollLeft + offset) / pps();
+  S.pps = clamp(newPps, MIN_PPS, MAX_PPS);
+  if (full) renderStudio(); else layoutZoom();
+  tl.scrollLeft = Math.max(0, t * S.pps - offset);
+}
+function zoomCenter(factor) {
+  const tl = $('#timeline'), r = tl.getBoundingClientRect();
+  zoomAround(pps() * factor, r.left + headerW() + (tl.clientWidth - headerW()) / 2, true);
+}
+$('#zoom-in').addEventListener('click', () => zoomCenter(1.5));
+$('#zoom-out').addEventListener('click', () => zoomCenter(1 / 1.5));
+
+(() => {
+  const tl = $('#timeline');
+  let pinch = null, pending = null, frame = null;
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  tl.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2 && S.project) {
+      const [a, b] = e.touches;
+      pinch = { d: dist(a, b), pps: pps() };
+      if (drag) { drag.el.style.left = drag.start0 * pps() + 'px'; drag = null; }
+    }
+  }, { passive: true });
+  tl.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const [a, b] = e.touches;
+    pending = { pps: pinch.pps * (dist(a, b) / pinch.d), x: (a.clientX + b.clientX) / 2 };
+    if (!frame) frame = requestAnimationFrame(() => { frame = null; zoomAround(pending.pps, pending.x, false); });
+  }, { passive: false });
+  const end = (e) => {
+    if (!pinch || e.touches.length >= 2) return;
+    pinch = null;
+    const sl = tl.scrollLeft;
+    renderStudio();        // al soltar: redibuja las formas de onda con el nuevo zoom
+    tl.scrollLeft = sl;
+  };
+  tl.addEventListener('touchend', end);
+  tl.addEventListener('touchcancel', end);
+  // En compu: Ctrl + rueda del mouse
+  tl.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    zoomAround(pps() * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, true);
+  }, { passive: false });
+
+  // Como en BandLab: si tocas o deslizas la línea de tiempo mientras suena, se pausa sola.
+  const autoPause = (e) => {
+    if (!engine.playing || S.recording) return;
+    if (e.target.closest && e.target.closest('.track-head, .add-row, .corner')) return;
+    stopPlayback();
+  };
+  tl.addEventListener('pointerdown', autoPause, true);
+  tl.addEventListener('wheel', autoPause, { passive: true });
+})();
+
+// ---------- Columna de pistas: abrir / hacer chiquita ----------
+function applyHeaderMode() {
+  const st = $('#studio');
+  st.classList.toggle('collapsed', !!S.settings.collapsed);
+  st.style.setProperty('--header-w', headerW() + 'px');
+  $('#heads-icon').setAttribute('href', S.settings.collapsed ? '#ic-chev-right' : '#ic-chev-left');
+}
+$('#toggle-heads').addEventListener('click', () => {
+  const tl = $('#timeline'), sl = tl.scrollLeft;
+  S.settings.collapsed = !S.settings.collapsed;
+  saveSettings();
+  applyHeaderMode();
+  renderStudio();
+  tl.scrollLeft = sl;
+});
+applyHeaderMode();
 
 // =====================================================================
 // Estudio: toques y arrastre

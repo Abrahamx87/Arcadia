@@ -202,3 +202,19 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 
 .mini { display: flex; align-items: center; gap: 8px; }
 .mini span { width: 26px; font-size: 11px; color: var(--text-2); flex: none; }
+
+/* Columna de pistas: botón para abrir / hacer chiquita */
+.heads-btn { width: 26px; height: 24px; border-radius: 6px; background: var(--surface); display: grid; place-items: center; flex: none; }
+.corner { gap: 4px; }
+.collapsed .corner { justify-content: center; padding: 0; }
+.collapsed #bpm-label, .collapsed .corner .zoom { display: none; }
+.collapsed .track-head .body { align-items: center; justify-content: center; padding: 4px; gap: 6px; }
+.collapsed .track-head .tname span, .collapsed .track-head .toggles .toggle, .collapsed .fx-dot { display: none; }
+.collapsed .track-head .tname svg { width: 22px; height: 22px; }
+.collapsed .add-row { padding: 10px 6px; }
+.collapsed .add-row button { font-size: 0; }
+.collapsed .add-row button::before { content: "+"; font-size: 20px; }
+.track-head .mstate { display: none; }
+.collapsed .track-head .mstate { display: flex; gap: 3px; }
+.mstate i { width: 6px; height: 6px; border-radius: 50%; }
+#bpm-label { white-space: nowrap; font-size: 10.5px; }
