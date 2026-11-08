@@ -17,7 +17,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.10';
+const VERSION = '0.11';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1376,6 +1376,7 @@ window.addEventListener('pagehide', () => { if (S.project) store.saveProject(S.p
 // =====================================================================
 // Arranque
 // =====================================================================
+$('#app-version').textContent = 'v' + VERSION;
 (async function init() {
   try { S.projects = await store.loadProjects(); } catch (e) { S.projects = []; }
   if (!S.projects.length && !S.settings.seeded) {

@@ -1,6 +1,6 @@
 // Service worker de Arcadia: guarda la app para que abra rápido y funcione sin internet.
 // Siempre pregunta primero al servidor si hay una versión nueva (sin usar copias viejas).
-const CACHE = 'arcadia-v10';
+const CACHE = 'arcadia-v11';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './css/app.css',
   './js/app.js', './js/engine.js', './js/effects.js', './js/store.js'];
 

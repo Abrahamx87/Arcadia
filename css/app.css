@@ -405,3 +405,6 @@ html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom
 .mixer.closing .mix-card { animation: mixOut .26s cubic-bezier(.5, 0, .75, 0) both; animation-delay: calc(var(--i, 0) * 18ms); }
 .mixer.opening .mix-master { animation: fadeIn .3s ease-out both; animation-delay: .15s; }
 .mixer.closing .mix-master { animation: fadeOut .15s ease-in both; }
+
+.lib-top h1 { display: flex; align-items: baseline; gap: 10px; }
+.ver { font-size: 13px; font-weight: 600; color: var(--text-2); background: var(--surface); padding: 3px 9px; border-radius: 99px; letter-spacing: 0; }
