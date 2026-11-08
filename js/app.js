@@ -17,6 +17,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
+const VERSION = '0.10';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1004,6 +1005,7 @@ function toggleMixer(open = !S.mixerOpen, animate = true) {
   if (open) {
     panel.classList.remove('hidden');
     renderMixer();
+    panel.scrollTop = $('#timeline').scrollTop;   // las tarjetas quedan justo encima de cada pista
     if (!animate) return;
     void panel.offsetWidth;                // reinicia la animación
     panel.classList.add('opening');
@@ -1012,7 +1014,7 @@ function toggleMixer(open = !S.mixerOpen, animate = true) {
   } else {
     if (!animate || panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
     panel.classList.add('closing');
-    mixerAnim = setTimeout(() => { panel.classList.add('hidden'); panel.classList.remove('closing'); mixerAnim = null; }, 300);
+    mixerAnim = setTimeout(() => { panel.classList.add('hidden'); panel.classList.remove('closing'); mixerAnim = null; }, 280 + (S.project ? S.project.tracks.length : 0) * 18);
   }
 }
 $('#open-mixer').addEventListener('click', () => toggleMixer());
@@ -1175,6 +1177,7 @@ function projectSheet() {
       <div class="sub" style="margin:-4px 0 10px">Si tu voz grabada queda atrasada respecto a la pista, súbelo poco a poco.</div>
       <button class="sheet-item" data-a="export">${icon('ic-download')}Exportar canción (WAV)</button>
       <button class="sheet-item" data-a="sync">${icon('ic-cloud-up')}Sincronizar con Abraham IA Music<span class="hint">Pronto</span></button>
+      <div class="sub" style="text-align:center;padding:14px 0 4px">Arcadia v${VERSION}</div>
     </div>`;
     const lat = el.querySelector('[data-range="lat"]');
     lat.addEventListener('input', () => { S.settings.latencyMs = +lat.value; el.querySelector('[data-show="lat"]').textContent = lat.value + ' ms'; saveSettings(); });
@@ -1383,5 +1386,14 @@ window.addEventListener('pagehide', () => { if (S.project) store.saveProject(S.p
   }
   store.askPersistence();
   await route();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => reg.update()).catch(() => {});
+    // Cuando llega una versión nueva, recarga una sola vez para usarla (si no estás grabando ni reproduciendo).
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded || S.recording || engine.playing) return;
+      reloaded = true;
+      location.reload();
+    });
+  }
 })();
