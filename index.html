@@ -384,7 +384,7 @@ function renderLibrary() {
 }
 $('#song-list').addEventListener('click', (e) => {
   const card = e.target.closest('[data-open]');
-  if (card) location.hash = '#/song/' + card.dataset.open;
+  if (card) location.hash = '#song-' + card.dataset.open;
 });
 
 $('#new-song').addEventListener('click', () => {
@@ -405,7 +405,7 @@ $('#new-song').addEventListener('click', () => {
     const song = { id: uid(), title, bpm: 120, durationSec: 120, coverColorIndex: i, fromAi: false, syncStatus: 'LOCAL', updatedAt: Date.now(),
       tracks: [track('Voz', 'VOCAL', i), track('Instrumental', 'INSTRUMENTAL', i + 1)] };
     state.songs.push(song); saveSongs(); closeOverlay();
-    location.hash = '#/song/' + song.id;
+    location.hash = '#song-' + song.id;
   });
 });
 
@@ -653,7 +653,7 @@ $('#playhead').style.top = '0';
 // =====================================================================
 function route() {
   closeOverlay();
-  const m = location.hash.match(/^#\/song\/(.+)$/);
+  const m = location.hash.match(/^#song-(.+)$/);
   pause();
   if (m && state.songs.some((s) => s.id === m[1])) {
     if (state.songId !== m[1]) { state.position = 0; state.selection = { trackId: null, regionId: null }; }
@@ -669,7 +669,7 @@ function route() {
     renderLibrary();
   }
 }
-$('#back').addEventListener('click', () => { if (history.length > 1) history.back(); else location.hash = '#/'; });
+$('#back').addEventListener('click', () => { if (history.length > 1) history.back(); else location.hash = ''; });
 window.addEventListener('hashchange', route);
 route();
 
