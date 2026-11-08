@@ -5,7 +5,7 @@ import { EFFECTS } from './effects.js';
 import { loadAudio } from './store.js';
 
 const dbToGain = (db) => Math.pow(10, db / 20);
-const PEAKS_PER_SEC = 200;
+const PEAKS_PER_SEC = 1000; // detalle de la onda: 1000 puntos por segundo
 
 export class Engine {
   constructor() {
@@ -147,7 +147,25 @@ export class Engine {
     return this.startPos + (this.ctx.currentTime - this.startCtxTime);
   }
 
+  /** Posición suave para dibujar: usa el reloj de la pantalla en vez de los "saltitos" del reloj de audio. */
+  visualPosition() {
+    if (!this.playing || !this.ctx) return this.startPos;
+    const ts = this.ctx.getOutputTimestamp ? this.ctx.getOutputTimestamp() : null;
+    let ctxTime;
+    if (ts && ts.performanceTime > 0 && ts.contextTime > 0) {
+      ctxTime = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+    } else {
+      ctxTime = this.ctx.currentTime;
+    }
+    const p = this.startPos + (ctxTime - this.startCtxTime);
+    // Nunca va hacia atrás ni da brincos: suaviza contra la última posición dibujada.
+    if (this._lastVis !== undefined && p < this._lastVis && this._lastVis - p < 0.05) return this._lastVis;
+    this._lastVis = Math.max(this.startPos, p);
+    return this._lastVis;
+  }
+
   play(project, from) {
+    this._lastVis = undefined;
     const ctx = this.ensure();
     this.stopSources();
     this.syncMix(project);

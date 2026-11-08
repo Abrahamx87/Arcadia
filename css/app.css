@@ -311,3 +311,12 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 .knob, .knob-svg { width: 44px; height: 44px; }
 .knob .kl, .knob .kr { bottom: -3px; font-size: 10px; }
 .mc-bottom { margin-top: -2px; }
+
+/* v0.6 — línea blanca fija (no tiembla), nitidez y fluidez */
+html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom a la página */
+.timeline { touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.playhead { position: absolute; top: 12px; left: 0; transform: none; will-change: auto; pointer-events: none; z-index: 5; }
+.region { contain: layout paint; }
+.region canvas { position: absolute; top: 0; height: 100%; }
+.lane, .ruler { backface-visibility: hidden; }
+.lane, .ruler { will-change: transform; }

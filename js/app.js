@@ -341,7 +341,7 @@ function renderStudio() {
     const regions = t.regions.map((r) => {
       const loading = !engine.buffers.has(r.audioId);
       return `<div class="region ${S.sel.regionId === r.id ? 'selected' : ''} ${loading ? 'loading' : ''}" data-region="${r.id}" data-track="${t.id}"
-        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color)};opacity:${dim ? 0.3 : 1}"><canvas></canvas></div>`;
+        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color)};opacity:${dim ? 0.3 : 1}"></div>`;
     }).join('');
     return `<div class="track-row ${selected ? 'selected' : ''}">
       <div class="track-head" data-head="${t.id}" aria-label="${esc(t.name)}">
@@ -357,12 +357,11 @@ function renderStudio() {
   }).join('');
   $('#tracks').innerHTML = rows || '<div class="empty" style="position:sticky;left:0;width:100vw">Este proyecto está vacío.<br>Toca el micrófono para grabar tu voz o <b>Importar</b> para subir tus pistas de IA.</div>';
 
-  // Formas de onda
-  p.tracks.forEach((t) => t.regions.forEach((r) => {
-    const el = $(`[data-region="${r.id}"] canvas`);
-    if (el) drawWave(el, r, t.color);
-  }));
-  $('#playhead').style.height = (30 + Math.max(1, p.tracks.length) * ROW_H) + 'px';
+  // Formas de onda en alta resolución, por partes y solo las que se ven
+  setupWaveTiles(p, scale);
+  fracEls = [...document.querySelectorAll('#tracks .lane'), $('#ruler')];
+  fracNow = 0;
+  layoutPlayhead();
   renderEditBar();
   updatePlayhead();
   updateUndoButtons();
@@ -376,53 +375,92 @@ function gridBg(p, scale) {
     (beatPx > 18 ? `, repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px ${beatPx}px)` : '');
 }
 
+// ---------- Formas de onda (nítidas a la resolución real de la pantalla) ----------
+const TILE = 1024;           // ancho de cada pedazo en píxeles de pantalla
+const DPR = () => Math.min(window.devicePixelRatio || 1, 4);
+const regionPeak = new Map();
+let tileObserver = null;
+
+function peakOf(r) {
+  const key = `${r.audioId}|${r.offset}|${r.length}`;
+  if (regionPeak.has(key)) return regionPeak.get(key);
+  const pk = engine.peaks.get(r.audioId);
+  if (!pk) return 1;
+  const a = Math.floor(r.offset * pk.rate), b = Math.min(pk.min.length, Math.ceil((r.offset + r.length) * pk.rate));
+  let m = 0.0001;
+  for (let i = a; i < b; i++) m = Math.max(m, pk.max[i], -pk.min[i]);
+  regionPeak.set(key, m);
+  return m;
+}
+
+function setupWaveTiles(p, scale) {
+  if (tileObserver) tileObserver.disconnect();
+  tileObserver = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (!en.isIntersecting) return;
+      tileObserver.unobserve(en.target);
+      drawTile(en.target);
+    });
+  }, { root: $('#timeline'), rootMargin: '0px 1200px 0px 1200px' });
+  p.tracks.forEach((t) => t.regions.forEach((r) => {
+    const el = document.querySelector(`[data-region="${r.id}"]`);
+    if (!el || !engine.peaks.has(r.audioId)) return;
+    const w = Math.max(3, r.length * scale);
+    for (let x0 = 0; x0 < w; x0 += TILE) {
+      const cv = document.createElement('canvas');
+      cv.width = 1; cv.height = 1;
+      cv.style.cssText = `left:${x0}px;width:${Math.min(TILE, w - x0)}px`;
+      cv._wave = { r, color: t.color, x0, tw: Math.min(TILE, w - x0), w };
+      el.appendChild(cv);
+      tileObserver.observe(cv);
+    }
+  }));
+}
+
 /** Onda rellena y simétrica, como en BandLab: color brillante sobre el mismo color oscuro. */
-function drawWave(canvas, r, color) {
-  const peaks = engine.peaks.get(r.audioId);
-  if (!peaks) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.min(canvas.clientWidth, 6000), h = canvas.clientHeight;
-  if (!w || !h) return;
-  canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  const mid = h / 2, n = peaks.min.length, g = r.gain ?? 1;
-  const amps = new Float32Array(Math.ceil(w));
-  let peak = 0.0001;
-  for (let x = 0; x < w; x++) {
-    const t0 = r.offset + (x / w) * r.length, t1 = r.offset + ((x + 1) / w) * r.length;
-    const a = Math.floor(t0 * peaks.rate);
+function drawTile(cv) {
+  const { r, color, x0, tw, w } = cv._wave;
+  const pk = engine.peaks.get(r.audioId);
+  if (!pk) return;
+  const dpr = DPR(), h = cv.clientHeight || 90;
+  const W = Math.max(1, Math.round(tw * dpr)), H = Math.round(h * dpr);
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const mid = H / 2, half = mid - 3 * dpr, n = pk.min.length;
+  const norm = 1 / Math.max(peakOf(r), 0.35);
+  const secPerPx = r.length / (w * dpr);
+  const amp = new Float32Array(W + 1);
+  for (let x = 0; x <= W; x++) {
+    const t0 = r.offset + (x0 * dpr + x) * secPerPx;
+    const a = Math.floor(t0 * pk.rate);
     if (a >= n) break;
-    const b = Math.min(n, Math.max(a + 1, Math.floor(t1 * peaks.rate)));
+    const b = Math.min(n, Math.max(a + 1, Math.floor((t0 + secPerPx) * pk.rate)));
     let m = 0;
-    for (let i = a; i < b; i++) m = Math.max(m, peaks.max[i], -peaks.min[i]);
-    amps[x] = m * g;
-    if (amps[x] > peak) peak = amps[x];
+    for (let i = a; i < b; i++) { const v = pk.max[i] > -pk.min[i] ? pk.max[i] : -pk.min[i]; if (v > m) m = v; }
+    amp[x] = Math.min(1, m * (r.gain ?? 1) * norm) * half;
   }
-  // Escala suave: las pistas bajitas también se ven, sin que las fuertes se salgan.
-  const norm = 1 / Math.max(peak, 0.35);
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(0, mid);
-  for (let x = 0; x < w; x++) ctx.lineTo(x, mid - Math.min(1, amps[x] * norm) * (mid - 3));
-  for (let x = Math.floor(w) - 1; x >= 0; x--) ctx.lineTo(x, mid + Math.min(1, amps[x] * norm) * (mid - 3));
+  ctx.moveTo(0, mid - amp[0]);
+  for (let x = 1; x <= W; x++) ctx.lineTo(x, mid - amp[x]);
+  for (let x = W; x >= 0; x--) ctx.lineTo(x, mid + amp[x]);
   ctx.closePath();
   ctx.fill();
-  ctx.fillRect(0, mid - 0.5, w, 1); // línea central, para que los silencios se vean como en BandLab
+  ctx.fillRect(0, mid - dpr * 0.5, W, Math.max(1, dpr)); // línea central: los silencios se ven como en BandLab
 }
 
 function drawRuler(p, width, scale) {
   const ruler = $('#ruler');
   ruler.style.width = width + 'px';
   ruler.querySelectorAll('canvas').forEach((c) => c.remove());
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const h = 30, TILE = 4000;
+  const dpr = DPR();
+  const h = 30, RT = 2048;
   const beatPx = (60 / p.bpm) * scale;
   const barEvery = beatPx * 4 < 30 ? 4 : 1; // con poco zoom, numera cada 4 compases
-  for (let x0 = 0; x0 < width; x0 += TILE) {
-    const w = Math.min(TILE, width - x0);
+  for (let x0 = 0; x0 < width; x0 += RT) {
+    const w = Math.min(RT, width - x0);
     const cv = document.createElement('canvas');
-    cv.width = w * dpr; cv.height = h * dpr;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
     cv.style.cssText = `position:absolute;left:${x0}px;top:0;width:${w}px;height:${h}px`;
     const ctx = cv.getContext('2d');
     ctx.scale(dpr, dpr);
@@ -455,22 +493,42 @@ const findTrack = (id) => S.project?.tracks.find((t) => t.id === id);
 
 // ---------- Cursor de reproducción ----------
 let raf = null;
-function updatePlayhead(follow = false) {
-  const pos = engine.position;
-  const x = pos * pps();
-  $('#playhead').style.transform = `translateX(${headerW() + lead() + x}px)`;
+// La línea blanca es una capa fija encima de la línea de tiempo: nunca se mueve ni tiembla.
+// Lo que se desplaza es la canción por debajo (como en BandLab).
+let lastTimeText = '';
+function updatePlayhead(follow = false, pos = engine.position) {
   const m = Math.floor(pos / 60), sec = pos - m * 60;
-  $('#t-now').innerHTML = `${String(m).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')}<small>.${Math.floor((sec % 1) * 10)}</small>`;
-  // Como en BandLab: la línea blanca se queda en medio y la canción corre por debajo.
-  if (follow) setScroll(x);
+  const txt = `${String(m).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')}<small>.${Math.floor((sec % 1) * 10)}</small>`;
+  if (txt !== lastTimeText) { $('#t-now').innerHTML = txt; lastTimeText = txt; }
+  if (follow) {
+    // Desplazamiento sub-píxel: la parte entera la mueve el scroll y la fracción una transformación,
+    // así la canción corre perfectamente suave aunque el scroll solo avance en píxeles enteros.
+    const x = pos * pps(), ix = Math.floor(x);
+    setScroll(ix);
+    const frac = $('#timeline').scrollLeft - x;
+    setFrac(Math.abs(frac) < 1.5 ? frac : 0);
+  }
+}
+let fracEls = [], fracNow = 0;
+function setFrac(f) {
+  if (Math.abs(f - fracNow) < 0.01) return;
+  fracNow = f;
+  const v = f ? `translate3d(${f.toFixed(3)}px,0,0)` : '';
+  fracEls.forEach((el) => { el.style.transform = v; });
 }
 function setScroll(x) {
   const tl = $('#timeline');
-  if (Math.abs(tl.scrollLeft - x) >= 0.5) tl.scrollLeft = x;
+  if (Math.abs(tl.scrollLeft - x) >= 0.25) tl.scrollLeft = x;
+}
+function layoutPlayhead() {
+  const ph = $('#playhead'), wrap = $('.tl-wrap');
+  if (!S.project) return;
+  ph.style.left = headerW() + lead() + 'px';
+  ph.style.height = Math.max(0, Math.min(30 + Math.max(1, S.project.tracks.length) * ROW_H, wrap.clientHeight) - 12) + 'px';
 }
 function tick() {
   if (!engine.playing) return;
-  updatePlayhead(true);
+  updatePlayhead(true, engine.visualPosition());
   if (S.recording) {
     const rr = $('#rec-region');
     if (rr) rr.style.width = Math.max(0, (engine.position - S.recording.start) * pps()) + 'px';
@@ -490,6 +548,7 @@ function startPlayback() {
 }
 function stopPlayback() {
   engine.stop();
+  setFrac(0);
   $('#play-icon').setAttribute('href', '#ic-play');
   cancelAnimationFrame(raf);
   updatePlayhead();
@@ -517,59 +576,55 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
 });
 
-// ---------- Zoom: botones + pellizco con dos dedos (como en BandLab) ----------
-/** Cambio rápido de zoom sin redibujar todo: solo mueve y estira lo que ya existe. */
-function layoutZoom() {
-  const p = S.project, scale = pps();
-  const width = Math.ceil(timelineLength() * scale);
-  $('#tl-inner').style.width = headerW() + lead() * 2 + width + 'px';
-  drawRuler(p, width, scale);
-  const grid = gridBg(p, scale);
-  document.querySelectorAll('#tracks .lane').forEach((l) => { l.style.width = width + 'px'; l.style.backgroundImage = grid; });
-  p.tracks.forEach((t) => t.regions.forEach((r) => {
-    const el = document.querySelector(`[data-region="${r.id}"]`);
-    if (el) { el.style.left = r.start * scale + 'px'; el.style.width = Math.max(4, r.length * scale) + 'px'; }
-  }));
-  updatePlayhead();
-}
-/** Zoom manteniendo fijo el momento de la canción que está bajo el dedo. */
-function zoomAround(newPps, clientX, full) {
-  // El zoom se hace alrededor de la línea blanca, que no se mueve.
+// ---------- Zoom: pellizco con dos dedos (como en BandLab) ----------
+/** Zoom alrededor de la línea blanca, que no se mueve. */
+function zoomAround(newPps) {
   const pos = engine.position;
   S.pps = clamp(newPps, MIN_PPS, MAX_PPS);
-  if (full) renderStudio(); else layoutZoom();
+  renderStudio();
   setScroll(pos * S.pps);
   updatePlayhead();
 }
-function zoomCenter(factor) {
-  const tl = $('#timeline'), r = tl.getBoundingClientRect();
-  zoomAround(pps() * factor, r.left + headerW() + (tl.clientWidth - headerW()) / 2, true);
-}
 
-
+let pinch = null;
 (() => {
   const tl = $('#timeline');
-  let pinch = null, pending = null, frame = null;
+  let pending = null, frame = null, targets = [];
   const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   tl.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2 && S.project) {
       const [a, b] = e.touches;
-      pinch = { d: dist(a, b), pps: pps() };
+      const pos = engine.position;
+      pinch = { d: dist(a, b), pps: pps(), pos, k: 1 };
       if (drag) { drag.el.style.left = drag.start0 * pps() + 'px'; drag = null; }
+      // Mientras pellizcas solo se "estira" la imagen con la tarjeta gráfica (súper fluido);
+      // al soltar se vuelve a dibujar todo nítido con el nuevo zoom.
+      targets = [...document.querySelectorAll('#tracks .lane'), $('#ruler')];
+      targets.forEach((el) => { el.style.transformOrigin = `${pos * pinch.pps}px 0`; el.style.willChange = 'transform'; });
     }
   }, { passive: true });
   tl.addEventListener('touchmove', (e) => {
     if (!pinch || e.touches.length !== 2) return;
     e.preventDefault();
     const [a, b] = e.touches;
-    pending = { pps: pinch.pps * (dist(a, b) / pinch.d), x: (a.clientX + b.clientX) / 2 };
-    if (!frame) frame = requestAnimationFrame(() => { frame = null; zoomAround(pending.pps, pending.x, false); });
+    const want = clamp(pinch.pps * (dist(a, b) / pinch.d), MIN_PPS, MAX_PPS);
+    pending = want / pinch.pps;
+    if (!frame) frame = requestAnimationFrame(() => {
+      frame = null;
+      pinch.k = pending;
+      targets.forEach((el) => { el.style.transform = `scaleX(${pending})`; });
+    });
   }, { passive: false });
   const end = (e) => {
     if (!pinch || e.touches.length >= 2) return;
+    const { pps: p0, k, pos } = pinch;
     pinch = null;
-    renderStudio();        // al soltar: redibuja las formas de onda con el nuevo zoom
-    setScroll(engine.position * pps());
+    cancelAnimationFrame(frame); frame = null;
+    targets.forEach((el) => { el.style.transform = ''; el.style.willChange = ''; });
+    targets = [];
+    S.pps = clamp(p0 * k, MIN_PPS, MAX_PPS);
+    renderStudio();
+    setScroll(pos * S.pps);
   };
   tl.addEventListener('touchend', end);
   tl.addEventListener('touchcancel', end);
@@ -577,7 +632,7 @@ function zoomCenter(factor) {
   tl.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    zoomAround(pps() * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, true);
+    zoomAround(pps() * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
   }, { passive: false });
 
   // Como en BandLab: al poner el dedo se pausa, deslizas la canción bajo la línea blanca
@@ -613,6 +668,7 @@ function zoomCenter(factor) {
   }, { passive: true });
 })();
 window.addEventListener('resize', () => { if (S.project) { renderStudio(); setScroll(engine.position * pps()); } });
+new ResizeObserver(() => { if (S.project) layoutPlayhead(); }).observe(document.querySelector('.tl-wrap'));
 
 
 
