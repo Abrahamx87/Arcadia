@@ -15,7 +15,7 @@ const TYPES = {
   CHOIR: { label: 'Coros', icon: 'ic-choir' },
   DRUMS: { label: 'Batería', icon: 'ic-drums' },
   BASS: { label: 'Bajo', icon: 'ic-bass' },
-  OTHER: { label: 'Otro', icon: 'ic-other' },
+  OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
@@ -332,7 +332,6 @@ function renderStudio() {
   $('#studio').style.setProperty('--lead', lead() + 'px');
   drawRuler(p, width, scale);
 
-  const grid = gridBg(p, scale);
   const anySolo = p.tracks.some((t) => t.solo);
   const rows = p.tracks.map((t) => {
     const dim = t.muted || (anySolo && !t.solo);
@@ -340,16 +339,23 @@ function renderStudio() {
     const selected = S.sel.trackId === t.id;
     const regions = t.regions.map((r) => {
       const loading = !engine.buffers.has(r.audioId);
-      return `<div class="region ${S.sel.regionId === r.id ? 'selected' : ''} ${loading ? 'loading' : ''}" data-region="${r.id}" data-track="${t.id}"
-        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color)};opacity:${dim ? 0.3 : 1}"></div>`;
+      const sel = S.sel.regionId === r.id;
+      return `<div class="region ${sel ? 'selected' : ''} ${loading ? 'loading' : ''}" data-region="${r.id}" data-track="${t.id}"
+        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color, 0.5)};opacity:${dim ? 0.35 : 1}">${sel ? '<i class="r-knob"></i>' : ''}</div>`;
     }).join('');
-    return `<div class="track-row ${selected ? 'selected' : ''}">
+    // Como en BandLab: cada pista tiene su fondo del mismo color (oscuro) de lado a lado,
+    // y antes del inicio de la canción se ve su nombre con el botón +Fx.
+    return `<div class="track-row ${selected ? 'selected' : ''}" style="--row:${shade(t.color, selected ? 0.34 : 0.24)}">
       <div class="track-head" data-head="${t.id}" aria-label="${esc(t.name)}">
-        <svg class="i" style="color:${t.color};opacity:${dim ? 0.4 : 1}"><use href="#${TYPES[t.type]?.icon || 'ic-other'}"/></svg>
-        ${fxOn ? `<span class="fx-badge" style="background:${tint(t.color, 0.28)};color:${t.color}">Fx</span>` : ''}
-        ${t.muted || t.solo ? `<span class="ms-badge">${t.muted ? '<b style="color:var(--mute)">M</b>' : ''}${t.solo ? '<b style="color:var(--solo)">S</b>' : ''}</span>` : ''}
+        <svg class="i" style="color:${t.color};opacity:${dim ? 0.4 : 1}"><use href="#${TYPES[t.type]?.icon || 'ic-wave'}"/></svg>
+        ${selected ? `<button class="head-del" data-delhead="${t.id}" aria-label="Eliminar pista ${esc(t.name)}">${icon('ic-delete')}</button>`
+          : t.muted || t.solo ? `<span class="ms-badge">${t.muted ? '<b style="color:var(--mute)">M</b>' : ''}${t.solo ? '<b style="color:var(--solo)">S</b>' : ''}</span>` : ''}
       </div>
-      <div class="lane" data-lane="${t.id}" style="width:${width}px;background-image:${grid}">
+      <div class="lane" data-lane="${t.id}" style="width:${width}px">
+        <div class="lane-label" style="color:${t.color}">
+          <span class="ll-name">${esc(t.name)}</span>
+          <button class="ll-fx" data-llfx="${t.id}" style="background:${shade(t.color, 0.55)};color:${fxOn ? t.color : 'var(--text)'}">${fxOn ? `<i>Fx</i> ${esc(t.presetName || 'Personalizado')}` : '+<i>Fx</i>'}</button>
+        </div>
         ${regions}
         ${S.recording && S.recording.trackId === t.id ? `<div class="rec-region" id="rec-region" style="left:${S.recording.start * scale}px;width:0"></div>` : ''}
       </div>
@@ -440,6 +446,12 @@ function drawTile(cv) {
     for (let i = a; i < b; i++) { const v = pk.max[i] > -pk.min[i] ? pk.max[i] : -pk.min[i]; if (v > m) m = v; }
     amp[x] = Math.min(1, m * (r.gain ?? 1) * norm) * half;
   }
+  // Suavizado ligero + grosor mínimo: los silencios se ven como una franja, como en BandLab.
+  const minBand = Math.max(1.5 * dpr, half * 0.06);
+  for (let x = 0; x <= W; x++) {
+    const v = (amp[Math.max(0, x - 1)] + amp[x] * 2 + amp[Math.min(W, x + 1)]) / 4;
+    amp[x] = Math.max(minBand, v);
+  }
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.moveTo(0, mid - amp[0]);
@@ -447,7 +459,6 @@ function drawTile(cv) {
   for (let x = W; x >= 0; x--) ctx.lineTo(x, mid + amp[x]);
   ctx.closePath();
   ctx.fill();
-  ctx.fillRect(0, mid - dpr * 0.5, W, Math.max(1, dpr)); // línea central: los silencios se ven como en BandLab
 }
 
 function drawRuler(p, width, scale) {
@@ -536,7 +547,7 @@ function layoutPlayhead() {
   const ph = $('#playhead'), wrap = $('.tl-wrap');
   if (!S.project) return;
   ph.style.left = headerW() + lead() + 'px';
-  ph.style.height = Math.max(0, Math.min(30 + Math.max(1, S.project.tracks.length) * ROW_H, wrap.clientHeight) - 12) + 'px';
+  ph.style.height = Math.max(0, Math.min(30 + Math.max(1, S.project.tracks.length) * ROW_H + 64, wrap.clientHeight) - 12) + 'px';
 }
 function tick() {
   if (!engine.playing) return;
@@ -700,6 +711,10 @@ $('#tracks').addEventListener('click', (e) => {
     commit(() => { if (mute) t.muted = !t.muted; else t.solo = !t.solo; }, { restart: false });
     return;
   }
+  const delh = e.target.closest('[data-delhead]');
+  if (delh) { deleteTrack(delh.dataset.delhead); return; }
+  const llfx = e.target.closest('[data-llfx]');
+  if (llfx) { S.sel = { trackId: llfx.dataset.llfx, regionId: null }; renderStudio(); effectsSheet(llfx.dataset.llfx); return; }
   const head = e.target.closest('[data-head]');
   if (head) {
     // Primer toque: selecciona la pista. Segundo toque: abre sus opciones.
@@ -802,6 +817,18 @@ function bindRanges(el, handlers) {
   });
 }
 
+// ---------- Eliminar pista completa ----------
+async function deleteTrack(trackId) {
+  const t = findTrack(trackId); if (!t) return;
+  const ok = await dialog({ title: `¿Eliminar "${t.name}"?`, text: 'Se borra la pista completa con todo su audio. Puedes recuperarla con Deshacer.', ok: 'Eliminar', danger: true });
+  if (!ok) return;
+  commit((p) => { p.tracks = p.tracks.filter((x) => x.id !== trackId); });
+  S.sel = { trackId: null, regionId: null };
+  closeSheet();
+  renderStudio();
+  toast('Pista eliminada');
+}
+
 // ---------- Pista ----------
 function trackSheet(trackId) {
   openSheet((el) => {
@@ -850,10 +877,7 @@ function trackSheet(trackId) {
         commit((p) => { p.tracks.splice(p.tracks.indexOf(t) + 1, 0, copy); });
         closeSheet(); toast('Pista duplicada');
       }
-      if (a === 'del') {
-        const ok = await dialog({ title: `¿Eliminar "${t.name}"?`, text: 'Puedes recuperarla con Deshacer.', ok: 'Eliminar', danger: true });
-        if (ok) { commit((p) => { p.tracks = p.tracks.filter((x) => x !== t); }); S.sel = { trackId: null, regionId: null }; closeSheet(); renderStudio(); }
-      }
+      if (a === 'del') deleteTrack(t.id);
     };
   });
 }
@@ -914,6 +938,12 @@ $('#tb-metro').addEventListener('click', () => {
   if (engine.playing) startPlayback();
 });
 $('#tb-export').addEventListener('click', () => exportSong());
+function paintSnap() { $('#snap-btn').classList.toggle('on', !!S.settings.snap); }
+$('#snap-btn').addEventListener('click', () => {
+  S.settings.snap = !S.settings.snap; saveSettings(); paintSnap();
+  toast(S.settings.snap ? 'Imán encendido: los bloques se acomodan al ritmo' : 'Imán apagado: movimiento libre');
+});
+paintSnap();
 
 // ---------- Mezclador (panel de tarjetas de color, como en BandLab) ----------
 function knobSvg(pan) {

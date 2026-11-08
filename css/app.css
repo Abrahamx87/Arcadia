@@ -320,3 +320,35 @@ html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom
 .region canvas { position: absolute; top: 0; height: 100%; }
 .lane, .ruler { backface-visibility: hidden; }
 .lane, .ruler { will-change: transform; }
+
+/* v0.8 — detalles para que se sienta igual que BandLab */
+.track-row { background: var(--row, #111); }
+.track-row .track-head, .track-row.selected .track-head { background: var(--row, #111); }
+.track-row.selected { background: var(--row); }
+.lane { background: transparent !important; overflow: visible; }
+.region { border-radius: 10px; overflow: hidden; }
+.region.selected { overflow: visible; box-shadow: none; outline: 2.5px solid #fff; outline-offset: -1px; }
+.region.selected canvas { border-radius: 10px; }
+.r-knob { position: absolute; left: -9px; top: 50%; width: 20px; height: 20px; margin-top: -10px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,.4); z-index: 2; }
+.lane-label { position: absolute; top: 0; bottom: 0; right: 100%; width: calc(var(--lead) - 8px); padding: 0 12px 0 14px;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px; pointer-events: none; }
+.ll-name { font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll-fx { pointer-events: auto; align-self: flex-start; height: 30px; padding: 0 14px; border-radius: 99px; font-size: 14px; font-weight: 600;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll-fx i { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-style: italic; font-size: 15px; }
+.head-del { width: 34px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: rgba(0,0,0,.35); color: #fff; }
+.head-del svg.i { width: 18px !important; height: 18px !important; }
+.head-del:active { background: var(--accent); }
+.add-row { position: sticky; left: 0; width: auto; padding: 8px 0 0 4px; height: 72px; }
+.add-btn { width: 52px; height: 52px; border-radius: 14px; background: #1b1b21; color: #fff; display: grid; place-items: center; }
+.add-btn svg.i { width: 30px; height: 30px; }
+.add-btn:active { background: #2a2a32; }
+.ruler-row { position: sticky; }
+.snap-btn { position: sticky; right: 6px; margin-left: auto; align-self: center; z-index: 5; width: 40px; height: 26px; border-radius: 99px;
+  background: #1b1b21; color: var(--text-2); display: grid; place-items: center; flex: none; }
+.snap-btn.on { color: #fff; background: #2b2b33; }
+.playhead { width: 1.2px; }
+.add-row { width: 64px !important; padding: 10px 0 0 4px !important; }
+.add-row .add-btn { width: 52px !important; height: 52px; padding: 0 !important; border: 0 !important; font-size: 0; }
+.add-row .add-btn::before { content: none !important; }
