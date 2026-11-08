@@ -167,8 +167,12 @@ function busy(msg) {
 }
 
 let sheetRender = null;
+let sheetCloseTimer = null;
 function openSheet(render) {
+  clearTimeout(sheetCloseTimer);
+  const already = $('#overlay .scrim:not(.closing)');
   sheetRender = render;
+  if (already) { refreshSheet(); return; }   // cambiar de hoja sin volver a animar
   $('#overlay').innerHTML = '<div class="scrim" data-close><div class="sheet"><div class="grip"></div><div class="sheet-inner"></div></div></div>';
   refreshSheet();
 }
@@ -182,7 +186,14 @@ function refreshSheet() {
   if (body) body.scrollTop = scroll;
   paintRanges(inner);
 }
-function closeSheet() { $('#overlay').innerHTML = ''; sheetRender = null; endLive(); }
+function closeSheet() {
+  sheetRender = null; endLive();
+  const scrim = $('#overlay .scrim');
+  if (!scrim) return;
+  scrim.classList.add('closing');
+  clearTimeout(sheetCloseTimer);
+  sheetCloseTimer = setTimeout(() => { $('#overlay').innerHTML = ''; }, 260);
+}
 $('#overlay').addEventListener('click', (e) => { if (e.target.hasAttribute('data-close')) closeSheet(); });
 
 function sheetHead(title, extra = '') {
@@ -960,7 +971,7 @@ function renderMixer() {
   if (!p || !panel) return;
   const scroll = panel.scrollTop;
   panel.innerHTML = p.tracks.map((t, i) => `
-    <div class="mix-row ${t.muted ? 'muted' : ''}">
+    <div class="mix-row ${t.muted ? 'muted' : ''}" style="--i:${i}">
       <div class="mix-card" style="background:${t.color}">
         <div class="mc-top">
           <span class="mc-num">${i + 1}</span>
@@ -977,15 +988,32 @@ function renderMixer() {
         </div>
       </div>
       <button class="mix-icon" data-mhead="${t.id}" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}</button>
-    </div>`).join('') + `<div class="mix-row"><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
+    </div>`).join('') + `<div class="mix-row" style="--i:${p.tracks.length}"><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
   panel.scrollTop = scroll;
   paintRanges(panel);
 }
-function toggleMixer(open = !S.mixerOpen) {
+// Animación de abrir/cerrar el mezclador: las tarjetas salen desde la izquierda una tras otra.
+let mixerAnim = null;
+function toggleMixer(open = !S.mixerOpen, animate = true) {
+  const panel = $('#mixer');
+  if (open === S.mixerOpen && !mixerAnim) return;
   S.mixerOpen = open;
-  $('#mixer').classList.toggle('hidden', !open);
   $('#open-mixer').classList.toggle('on', open);
-  if (open) renderMixer();
+  clearTimeout(mixerAnim); mixerAnim = null;
+  panel.classList.remove('opening', 'closing');
+  if (open) {
+    panel.classList.remove('hidden');
+    renderMixer();
+    if (!animate) return;
+    void panel.offsetWidth;                // reinicia la animación
+    panel.classList.add('opening');
+    const n = S.project ? S.project.tracks.length : 0;
+    mixerAnim = setTimeout(() => { panel.classList.remove('opening'); mixerAnim = null; }, 420 + n * 40);
+  } else {
+    if (!animate || panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
+    panel.classList.add('closing');
+    mixerAnim = setTimeout(() => { panel.classList.add('hidden'); panel.classList.remove('closing'); mixerAnim = null; }, 300);
+  }
 }
 $('#open-mixer').addEventListener('click', () => toggleMixer());
 
@@ -1309,7 +1337,7 @@ async function openProject(p) {
   S.project = p;
   S.sel = { trackId: null, regionId: null };
   S.undo = []; S.redo = [];
-  toggleMixer(false);
+  toggleMixer(false, false);
   engine.startPos = 0;
   engine.chains.forEach((c) => { try { c.vol.disconnect(); c.pan.disconnect(); } catch (e) {} });
   engine.chains.clear();

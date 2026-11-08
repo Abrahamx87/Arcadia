@@ -352,3 +352,36 @@ html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom
 .add-row { width: 64px !important; padding: 10px 0 0 4px !important; }
 .add-row .add-btn { width: 52px !important; height: 52px; padding: 0 !important; border: 0 !important; font-size: 0; }
 .add-row .add-btn::before { content: none !important; }
+
+/* v0.9 — animaciones fluidas (mezclador y hojas) */
+.mixer { animation: none; }
+.mixer.opening { animation: mixBg .28s ease-out both; }
+.mixer.opening .mix-row { animation: mixIn .42s cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--i, 0) * 40ms); }
+.mixer.opening .mix-icon { animation: fadeIn .3s ease-out both; animation-delay: calc(var(--i, 0) * 40ms + 80ms); }
+.mixer.closing { animation: mixBgOut .3s ease-in both; pointer-events: none; }
+.mixer.closing .mix-row { animation: mixOut .24s cubic-bezier(.5, 0, .75, 0) both; animation-delay: calc(var(--i, 0) * 18ms); }
+@keyframes mixIn { from { transform: translate3d(-105%, 0, 0); opacity: 0; } 60% { opacity: 1; } to { transform: none; opacity: 1; } }
+@keyframes mixOut { from { transform: none; opacity: 1; } to { transform: translate3d(-105%, 0, 0); opacity: 0; } }
+@keyframes mixBg { from { background-color: rgba(0,0,0,0); } to { background-color: #000; } }
+@keyframes mixBgOut { from { background-color: #000; } to { background-color: rgba(0,0,0,0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#open-mixer { transition: background-color .25s ease, color .25s ease, transform .2s ease; }
+#open-mixer:active { transform: scale(.9); }
+.tbtn, .round-btn, .rec-btn, .add-btn, .tool-pill button { transition: transform .15s ease, background-color .2s ease; }
+.tbtn:active, .round-btn:active, .add-btn:active { transform: scale(.9); }
+.rec-btn:active { transform: scale(.94); }
+
+/* Hojas: suben con rebote suave y bajan al cerrar */
+.scrim { animation: fadeIn .22s ease-out both; }
+.sheet { animation: sheetUp .38s cubic-bezier(.16, 1, .3, 1) both; }
+.scrim.closing { animation: fadeOut .24s ease-in both; pointer-events: none; }
+.scrim.closing .sheet { animation: sheetDown .24s cubic-bezier(.5, 0, .75, 0) both; }
+@keyframes sheetUp { from { transform: translate3d(0, 100%, 0); } to { transform: none; } }
+@keyframes sheetDown { from { transform: none; } to { transform: translate3d(0, 100%, 0); } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+.toast { animation: toastIn .3s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes toastIn { from { transform: translate(-50%, 12px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mixer.opening, .mixer.opening .mix-row, .mixer.closing, .mixer.closing .mix-row, .sheet, .scrim, .scrim.closing .sheet { animation-duration: .01s !important; animation-delay: 0s !important; }
+}
