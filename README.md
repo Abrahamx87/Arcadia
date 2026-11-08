@@ -2,7 +2,7 @@
 
 Estudio musical multipista estilo BandLab, hecho por Abraham. Es una web que funciona como app (PWA): se instala desde Chrome con **⋮ → Agregar a pantalla de inicio**. Al final se empaquetará como APK con [Capacitor](https://capacitorjs.com).
 
-**Abrir:** https://abrahamx87.github.io/arcadia/
+**Abrir:** https://abrahamx87.github.io/Arcadia/
 
 ## Versión 0.2: primer avance grande
 - **Biblioteca** estilo BandLab: Mis proyectos, Eliminados (papelera con restaurar), renombrar, duplicar
