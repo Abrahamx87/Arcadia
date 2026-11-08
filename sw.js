@@ -1,6 +1,7 @@
 // Service worker: guarda la app para que abra rápido y funcione sin internet.
-const CACHE = 'arcadia-v1';
-const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg'];
+const CACHE = 'arcadia-v2';
+const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './css/app.css',
+  './js/app.js', './js/engine.js', './js/effects.js', './js/store.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)));

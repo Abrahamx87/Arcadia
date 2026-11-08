@@ -1,19 +1,33 @@
 # Arcadia 🎛️
 
-Estudio musical multipista estilo BandLab, hecho por Abraham. Primero como web (PWA) para probar todo desde el celular; al final se empaqueta como app de Android con [Capacitor](https://capacitorjs.com).
+Estudio musical multipista estilo BandLab, hecho por Abraham. Es una web que funciona como app (PWA): se instala desde Chrome con **⋮ → Agregar a pantalla de inicio**. Al final se empaquetará como APK con [Capacitor](https://capacitorjs.com).
 
-## Fase 1 ✅
-- Biblioteca de canciones con estado de sincronización
-- Crear proyectos (se guardan en el navegador)
-- Editor multipista: regla de compases, pistas de colores, regiones con forma de onda
-- Mute (M) / Solo (S), seleccionar, duplicar y eliminar regiones
-- Reproducir con cursor que avanza (todavía sin sonido)
-- Instalable como app: en Chrome → menú ⋮ → "Agregar a pantalla de inicio"
+**Abrir:** https://abrahamx87.github.io/arcadia/
 
-## Fases
-1. ✅ Pantallas y editor
-2. Motor de audio (Web Audio API): reproducción real e importar pistas + grabación
-3. Mezclador y edición avanzada (mover, cortar, zoom)
-4. Efectos y exportar WAV
-5. Sincronización con Abraham IA Music
-6. Empaquetar como APK para el S25 Ultra
+## Versión 0.2: primer avance grande
+- **Biblioteca** estilo BandLab: Mis proyectos, Eliminados (papelera con restaurar), renombrar, duplicar
+- **Studio negro puro** con pistas de colores: renombrar, cambiar color, tipo, subir/bajar, duplicar, eliminar
+- **Audio real** (Web Audio API): reproducción multipista, formas de onda reales, zoom
+- **Importar** MP3/WAV/M4A (varias pistas a la vez, detecta voz, coros, beat, bajo por el nombre)
+- **Grabar** con el micrófono, con compensación de retraso
+- **Editar regiones**: mover (toca y arrastra), dividir en el cursor, duplicar, renombrar, borrar
+- **Mezclador**: volumen, paneo, mute, solo y volumen general
+- **Efectos** por pista: Univerb, Exciter, Agudos, Ecualizador, Compresor, Delay, Limpiador
+- **Presets**: Brillo + RV, Voz limpia, Voz trap, Sala grande y presets propios
+- **Deshacer / rehacer**, metrónomo, tempo, ajuste a la cuadrícula
+- **Exportar** la canción a WAV (descargar o compartir)
+- Todo se guarda en el celular (IndexedDB), también sin internet
+
+## Estructura
+```
+index.html         Pantallas e íconos
+css/app.css        Tema negro puro
+js/app.js          Interfaz: biblioteca, estudio, hojas
+js/engine.js       Motor de audio: reproducir, grabar, exportar, demo
+js/effects.js      Efectos y presets
+js/store.js        Guardado local (IndexedDB)
+sw.js              Funciona sin internet
+```
+
+## Siguiente
+Sincronización con Abraham IA Music · recortar bordes de regiones · automatización · empaquetar APK
