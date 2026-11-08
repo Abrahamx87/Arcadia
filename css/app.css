@@ -218,3 +218,6 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 .collapsed .track-head .mstate { display: flex; gap: 3px; }
 .mstate i { width: 6px; height: 6px; border-radius: 50%; }
 #bpm-label { white-space: nowrap; font-size: 10.5px; }
+
+/* Línea blanca fija en medio: espacio antes y después de la canción */
+.ruler, .lane { margin-left: var(--lead, 0px); }

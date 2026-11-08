@@ -54,6 +54,8 @@ const S = {
 engine.metronome = S.settings.metronome;
 const pps = () => S.pps;
 const headerW = () => (S.settings.collapsed ? 52 : 132);
+/** Espacio a cada lado para que el inicio y el final de la canción puedan quedar bajo la línea blanca del centro. */
+const lead = () => Math.max(40, Math.round(($('#timeline').clientWidth - headerW()) / 2));
 
 // ---------- Modelos ----------
 function nextColor(project) {
@@ -320,7 +322,8 @@ function renderStudio() {
   $('#studio-sub').textContent = `${p.tracks.length} pistas · ${p.bpm} BPM`;
   $('#bpm-label').textContent = `${p.bpm} BPM`;
   $('#t-total').textContent = '/ ' + fmtTime(Math.max(projectEnd(p), 0));
-  $('#tl-inner').style.width = headerW() + width + 'px';
+  $('#tl-inner').style.width = headerW() + lead() * 2 + width + 'px';
+  $('#studio').style.setProperty('--lead', lead() + 'px');
   drawRuler(p, width, scale);
 
   const grid = gridBg(p, scale);
@@ -445,15 +448,15 @@ let raf = null;
 function updatePlayhead(follow = false) {
   const pos = engine.position;
   const x = pos * pps();
-  $('#playhead').style.transform = `translateX(${headerW() + x}px)`;
+  $('#playhead').style.transform = `translateX(${headerW() + lead() + x}px)`;
   $('#ph-tri').style.transform = `translateX(${x}px)`;
   $('#t-now').textContent = fmtTime(pos);
-  if (follow) {
-    const tl = $('#timeline');
-    const visible = tl.clientWidth - headerW();
-    const rel = x - tl.scrollLeft;
-    if (rel > visible * 0.85 || rel < 0) tl.scrollLeft = Math.max(0, x - visible * 0.15);
-  }
+  // Como en BandLab: la línea blanca se queda en medio y la canción corre por debajo.
+  if (follow) setScroll(x);
+}
+function setScroll(x) {
+  const tl = $('#timeline');
+  if (Math.abs(tl.scrollLeft - x) >= 0.5) tl.scrollLeft = x;
 }
 function tick() {
   if (!engine.playing) return;
@@ -461,7 +464,7 @@ function tick() {
   if (S.recording) {
     const rr = $('#rec-region');
     if (rr) rr.style.width = Math.max(0, (engine.position - S.recording.start) * pps()) + 'px';
-    if (engine.position * pps() > parseFloat($('#tl-inner').style.width) - headerW() - 200) renderStudio();
+    if (engine.position * pps() > parseFloat($('#tl-inner').style.width) - headerW() - lead() * 2 - 200) renderStudio();
   } else if (engine.position > timelineLength()) {
     stopPlayback();
   }
@@ -487,7 +490,7 @@ function seek(sec) {
   if (wasPlaying) engine.stop();
   engine.startPos = pos;
   if (wasPlaying) engine.play(S.project, pos);
-  updatePlayhead();
+  updatePlayhead(true);
 }
 
 $('#play').addEventListener('click', async () => {
@@ -497,7 +500,7 @@ $('#play').addEventListener('click', async () => {
   await engine.loadProject(S.project);
   startPlayback();
 });
-$('#rewind').addEventListener('click', () => { if (S.recording) return; seek(0); $('#timeline').scrollLeft = 0; });
+$('#rewind').addEventListener('click', () => { if (S.recording) return; seek(0); });
 document.addEventListener('keydown', (e) => {
   if (!S.project || e.target.matches('input, select, textarea')) return;
   if (e.code === 'Space') { e.preventDefault(); $('#play').click(); }
@@ -509,7 +512,7 @@ document.addEventListener('keydown', (e) => {
 function layoutZoom() {
   const p = S.project, scale = pps();
   const width = Math.ceil(timelineLength() * scale);
-  $('#tl-inner').style.width = headerW() + width + 'px';
+  $('#tl-inner').style.width = headerW() + lead() * 2 + width + 'px';
   drawRuler(p, width, scale);
   const grid = gridBg(p, scale);
   document.querySelectorAll('#tracks .lane').forEach((l) => { l.style.width = width + 'px'; l.style.backgroundImage = grid; });
@@ -521,12 +524,12 @@ function layoutZoom() {
 }
 /** Zoom manteniendo fijo el momento de la canción que está bajo el dedo. */
 function zoomAround(newPps, clientX, full) {
-  const tl = $('#timeline');
-  const offset = clientX - tl.getBoundingClientRect().left - headerW();
-  const t = (tl.scrollLeft + offset) / pps();
+  // El zoom se hace alrededor de la línea blanca, que no se mueve.
+  const pos = engine.position;
   S.pps = clamp(newPps, MIN_PPS, MAX_PPS);
   if (full) renderStudio(); else layoutZoom();
-  tl.scrollLeft = Math.max(0, t * S.pps - offset);
+  setScroll(pos * S.pps);
+  updatePlayhead();
 }
 function zoomCenter(factor) {
   const tl = $('#timeline'), r = tl.getBoundingClientRect();
@@ -556,9 +559,8 @@ $('#zoom-out').addEventListener('click', () => zoomCenter(1 / 1.5));
   const end = (e) => {
     if (!pinch || e.touches.length >= 2) return;
     pinch = null;
-    const sl = tl.scrollLeft;
     renderStudio();        // al soltar: redibuja las formas de onda con el nuevo zoom
-    tl.scrollLeft = sl;
+    setScroll(engine.position * pps());
   };
   tl.addEventListener('touchend', end);
   tl.addEventListener('touchcancel', end);
@@ -569,15 +571,39 @@ $('#zoom-out').addEventListener('click', () => zoomCenter(1 / 1.5));
     zoomAround(pps() * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, true);
   }, { passive: false });
 
-  // Como en BandLab: si tocas o deslizas la línea de tiempo mientras suena, se pausa sola.
-  const autoPause = (e) => {
-    if (!engine.playing || S.recording) return;
-    if (e.target.closest && e.target.closest('.track-head, .add-row, .corner')) return;
-    stopPlayback();
+  // Como en BandLab: al poner el dedo se pausa, deslizas la canción bajo la línea blanca
+  // y al soltar sigue sonando desde donde la dejaste.
+  let touching = false, resumeAfter = false, resumeTimer = null;
+  const excluded = (e) => e.target.closest && e.target.closest('.track-head, .add-row, .corner, .region.selected');
+  const scheduleResume = () => {
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(() => {
+      if (touching || !resumeAfter || !S.project) return;
+      resumeAfter = false;
+      startPlayback();
+    }, 260);
   };
-  tl.addEventListener('pointerdown', autoPause, true);
-  tl.addEventListener('wheel', autoPause, { passive: true });
+  const press = (e) => {
+    if (excluded(e)) return;
+    touching = true;
+    clearTimeout(resumeTimer);
+    if (engine.playing && !S.recording) { stopPlayback(); resumeAfter = true; }
+  };
+  const release = () => { if (!touching) return; touching = false; if (resumeAfter) scheduleResume(); };
+  tl.addEventListener('touchstart', press, { passive: true, capture: true });
+  tl.addEventListener('mousedown', press, true);
+  window.addEventListener('touchend', release);
+  window.addEventListener('touchcancel', release);
+  window.addEventListener('mouseup', release);
+  tl.addEventListener('wheel', (e) => { if (e.ctrlKey) return; press(e); touching = false; scheduleResume(); }, { passive: true });
+  tl.addEventListener('scroll', () => {
+    if (!S.project || S.recording || engine.playing || pinch) return;
+    engine.startPos = clamp(tl.scrollLeft / pps(), 0, timelineLength());
+    updatePlayhead();
+    if (resumeAfter && !touching) scheduleResume();
+  }, { passive: true });
 })();
+window.addEventListener('resize', () => { if (S.project) { renderStudio(); setScroll(engine.position * pps()); } });
 
 // ---------- Columna de pistas: abrir / hacer chiquita ----------
 function applyHeaderMode() {
@@ -587,12 +613,11 @@ function applyHeaderMode() {
   $('#heads-icon').setAttribute('href', S.settings.collapsed ? '#ic-chev-right' : '#ic-chev-left');
 }
 $('#toggle-heads').addEventListener('click', () => {
-  const tl = $('#timeline'), sl = tl.scrollLeft;
   S.settings.collapsed = !S.settings.collapsed;
   saveSettings();
   applyHeaderMode();
   renderStudio();
-  tl.scrollLeft = sl;
+  setScroll(engine.position * pps());
 });
 applyHeaderMode();
 
@@ -613,7 +638,6 @@ $('#tracks').addEventListener('click', (e) => {
   if (reg) { S.sel = { trackId: reg.dataset.track, regionId: reg.dataset.region }; renderStudio(); return; }
   const lane = e.target.closest('[data-lane]');
   if (lane) {
-    seek((e.clientX - lane.getBoundingClientRect().left) / pps());
     const changed = S.sel.regionId || S.sel.trackId !== lane.dataset.lane;
     S.sel = { trackId: lane.dataset.lane, regionId: null };
     if (changed) renderStudio();
