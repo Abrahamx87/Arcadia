@@ -46,6 +46,7 @@ const S = {
   project: null,
   sel: { trackId: null, regionId: null },
   pps: 40,
+  mixerOpen: false,
   undo: [],
   redo: [],
   recording: null,
@@ -53,7 +54,7 @@ const S = {
 };
 engine.metronome = S.settings.metronome;
 const pps = () => S.pps;
-const headerW = () => (S.settings.collapsed ? 52 : 132);
+const headerW = () => 60;
 /** Espacio a cada lado para que el inicio y el final de la canción puedan quedar bajo la línea blanca del centro. */
 const lead = () => Math.max(40, Math.round(($('#timeline').clientWidth - headerW()) / 2));
 
@@ -91,6 +92,7 @@ function demoProject() {
   const lead = add('OTHER', 'Melodía', 'lead');
   lead.volume = 0.6;
   lead.effects = PRESETS[0].effects.map((e) => makeEffect(e.type, e.params));
+  lead.presetName = PRESETS[0].name;
   return p;
 }
 
@@ -313,6 +315,12 @@ function projectMenu(p) {
 // =====================================================================
 const timelineLength = () => Math.max(60, projectEnd(S.project) + 30, S.recording ? engine.position + 30 : 0);
 
+const ROW_H = 93; // alto de pista (90) + separación negra (3)
+const hexRgb = (hex) => { const n = parseInt(hex.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const shade = (hex, k = 0.42) => { const [r, g, b] = hexRgb(hex); return `rgb(${Math.round(r * k)},${Math.round(g * k)},${Math.round(b * k)})`; };
+const tint = (hex, a) => { const [r, g, b] = hexRgb(hex); return `rgba(${r},${g},${b},${a})`; };
+const fxLabel = (t) => ((t.effects || []).length ? `<i>Fx</i> ${esc(t.presetName || 'Personalizado')}` : '+<i>Fx</i>');
+
 function renderStudio() {
   const p = S.project; if (!p) return;
   const scale = pps();
@@ -320,62 +328,56 @@ function renderStudio() {
   const width = Math.ceil(total * scale);
   $('#studio-title').textContent = p.title;
   $('#studio-sub').textContent = `${p.tracks.length} pistas · ${p.bpm} BPM`;
-  $('#bpm-label').textContent = `${p.bpm} BPM`;
-  $('#t-total').textContent = '/ ' + fmtTime(Math.max(projectEnd(p), 0));
   $('#tl-inner').style.width = headerW() + lead() * 2 + width + 'px';
   $('#studio').style.setProperty('--lead', lead() + 'px');
   drawRuler(p, width, scale);
 
   const grid = gridBg(p, scale);
   const anySolo = p.tracks.some((t) => t.solo);
-  const rows = p.tracks.map((t, i) => {
+  const rows = p.tracks.map((t) => {
     const dim = t.muted || (anySolo && !t.solo);
     const fxOn = (t.effects || []).some((e) => e.enabled);
+    const selected = S.sel.trackId === t.id;
     const regions = t.regions.map((r) => {
       const loading = !engine.buffers.has(r.audioId);
       return `<div class="region ${S.sel.regionId === r.id ? 'selected' : ''} ${loading ? 'loading' : ''}" data-region="${r.id}" data-track="${t.id}"
-        style="left:${r.start * scale}px;width:${Math.max(4, r.length * scale)}px;background:${t.color};opacity:${dim ? 0.35 : 1}">
-        <div class="rname">${esc(r.name)}</div><canvas></canvas></div>`;
+        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color)};opacity:${dim ? 0.3 : 1}"><canvas></canvas></div>`;
     }).join('');
-    return `<div class="track-row">
-      <div class="track-head ${S.sel.trackId === t.id ? 'selected' : ''}" data-head="${t.id}">
-        <div class="stripe" style="background:${t.color}"></div>
-        <div class="body">
-          <div class="tname" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}<span style="color:var(--text)">${esc(t.name)}</span></div>
-          <div class="mstate">${t.muted ? '<i style="background:var(--mute)"></i>' : ''}${t.solo ? '<i style="background:var(--solo)"></i>' : ''}</div>
-          <div class="toggles">
-            <button class="toggle m ${t.muted ? 'on' : ''}" data-mute="${t.id}">M</button>
-            <button class="toggle s ${t.solo ? 'on' : ''}" data-solo="${t.id}">S</button>
-            ${fxOn ? `<span class="fx-dot on" style="background:${t.color}">FX</span>` : ''}
-          </div>
-        </div>
+    return `<div class="track-row ${selected ? 'selected' : ''}">
+      <div class="track-head" data-head="${t.id}" aria-label="${esc(t.name)}">
+        <svg class="i" style="color:${t.color};opacity:${dim ? 0.4 : 1}"><use href="#${TYPES[t.type]?.icon || 'ic-other'}"/></svg>
+        ${fxOn ? `<span class="fx-badge" style="background:${tint(t.color, 0.28)};color:${t.color}">Fx</span>` : ''}
+        ${t.muted || t.solo ? `<span class="ms-badge">${t.muted ? '<b style="color:var(--mute)">M</b>' : ''}${t.solo ? '<b style="color:var(--solo)">S</b>' : ''}</span>` : ''}
       </div>
-      <div class="lane" data-lane="${t.id}" style="width:${width}px;background-color:${i % 2 ? 'var(--lane-alt)' : 'var(--lane)'};background-image:${grid}">
+      <div class="lane" data-lane="${t.id}" style="width:${width}px;background-image:${grid}">
         ${regions}
         ${S.recording && S.recording.trackId === t.id ? `<div class="rec-region" id="rec-region" style="left:${S.recording.start * scale}px;width:0"></div>` : ''}
       </div>
     </div>`;
   }).join('');
-  $('#tracks').innerHTML = rows || '<div class="empty" style="position:sticky;left:0;width:100vw">Este proyecto está vacío.<br>Toca <b>+ Pista</b> para grabar tu voz o <b>Importar</b> para subir tus pistas de IA.</div>';
+  $('#tracks').innerHTML = rows || '<div class="empty" style="position:sticky;left:0;width:100vw">Este proyecto está vacío.<br>Toca el micrófono para grabar tu voz o <b>Importar</b> para subir tus pistas de IA.</div>';
 
   // Formas de onda
   p.tracks.forEach((t) => t.regions.forEach((r) => {
     const el = $(`[data-region="${r.id}"] canvas`);
-    if (el) drawWave(el, r);
+    if (el) drawWave(el, r, t.color);
   }));
-  $('#playhead').style.height = (30 + Math.max(1, p.tracks.length) * 79) + 'px';
+  $('#playhead').style.height = (30 + Math.max(1, p.tracks.length) * ROW_H) + 'px';
   renderEditBar();
   updatePlayhead();
   updateUndoButtons();
+  if (S.mixerOpen) renderMixer();
+  $('#tb-metro').classList.toggle('on', !!S.settings.metronome);
 }
 
 function gridBg(p, scale) {
   const beatPx = (60 / p.bpm) * scale, barPx = beatPx * 4;
   return `repeating-linear-gradient(90deg, var(--grid-bar) 0 1px, transparent 1px ${barPx}px)` +
-    (beatPx > 14 ? `, repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px ${beatPx}px)` : '');
+    (beatPx > 18 ? `, repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px ${beatPx}px)` : '');
 }
 
-function drawWave(canvas, r) {
+/** Onda rellena y simétrica, como en BandLab: color brillante sobre el mismo color oscuro. */
+function drawWave(canvas, r, color) {
   const peaks = engine.peaks.get(r.audioId);
   if (!peaks) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -384,20 +386,29 @@ function drawWave(canvas, r) {
   canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  const mid = h / 2;
-  const n = peaks.min.length;
+  const mid = h / 2, n = peaks.min.length, g = r.gain ?? 1;
+  const amps = new Float32Array(Math.ceil(w));
+  let peak = 0.0001;
   for (let x = 0; x < w; x++) {
     const t0 = r.offset + (x / w) * r.length, t1 = r.offset + ((x + 1) / w) * r.length;
-    let a = Math.floor(t0 * peaks.rate), b = Math.max(a + 1, Math.floor(t1 * peaks.rate));
+    const a = Math.floor(t0 * peaks.rate);
     if (a >= n) break;
-    b = Math.min(b, n);
-    let lo = 0, hi = 0;
-    for (let i = a; i < b; i++) { if (peaks.min[i] < lo) lo = peaks.min[i]; if (peaks.max[i] > hi) hi = peaks.max[i]; }
-    const g = r.gain ?? 1;
-    const y1 = mid - Math.min(1, hi * g) * mid, y2 = mid - Math.max(-1, lo * g) * mid;
-    ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+    const b = Math.min(n, Math.max(a + 1, Math.floor(t1 * peaks.rate)));
+    let m = 0;
+    for (let i = a; i < b; i++) m = Math.max(m, peaks.max[i], -peaks.min[i]);
+    amps[x] = m * g;
+    if (amps[x] > peak) peak = amps[x];
   }
+  // Escala suave: las pistas bajitas también se ven, sin que las fuertes se salgan.
+  const norm = 1 / Math.max(peak, 0.35);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  for (let x = 0; x < w; x++) ctx.lineTo(x, mid - Math.min(1, amps[x] * norm) * (mid - 3));
+  for (let x = Math.floor(w) - 1; x >= 0; x--) ctx.lineTo(x, mid + Math.min(1, amps[x] * norm) * (mid - 3));
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(0, mid - 0.5, w, 1); // línea central, para que los silencios se vean como en BandLab
 }
 
 function drawRuler(p, width, scale) {
@@ -406,9 +417,8 @@ function drawRuler(p, width, scale) {
   ruler.querySelectorAll('canvas').forEach((c) => c.remove());
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const h = 30, TILE = 4000;
-  const beat = 60 / p.bpm;
-  const beatPx = beat * scale;
-  const barEvery = beatPx * 4 < 28 ? 4 : 1; // con poco zoom, numera cada 4 compases
+  const beatPx = (60 / p.bpm) * scale;
+  const barEvery = beatPx * 4 < 30 ? 4 : 1; // con poco zoom, numera cada 4 compases
   for (let x0 = 0; x0 < width; x0 += TILE) {
     const w = Math.min(TILE, width - x0);
     const cv = document.createElement('canvas');
@@ -416,15 +426,15 @@ function drawRuler(p, width, scale) {
     cv.style.cssText = `position:absolute;left:${x0}px;top:0;width:${w}px;height:${h}px`;
     const ctx = cv.getContext('2d');
     ctx.scale(dpr, dpr);
-    ctx.font = '600 10px system-ui, sans-serif';
+    ctx.font = '500 10.5px Inter, system-ui, sans-serif';
     const b0 = Math.floor(x0 / beatPx), b1 = Math.ceil((x0 + w) / beatPx);
     for (let b = b0; b <= b1; b++) {
       const x = Math.round(b * beatPx - x0) + 0.5;
       const isBar = b % 4 === 0;
-      if (!isBar && beatPx < 8) continue;
-      ctx.strokeStyle = isBar ? '#55555f' : '#26262e';
-      ctx.beginPath(); ctx.moveTo(x, isBar ? 8 : h * 0.62); ctx.lineTo(x, h); ctx.stroke();
-      if (isBar && (b / 4) % barEvery === 0) { ctx.fillStyle = '#9b9ba8'; ctx.fillText(String(b / 4 + 1), x + 4, 16); }
+      if (!isBar && beatPx < 9) continue;
+      ctx.strokeStyle = isBar ? '#8a8a94' : '#4a4a52';
+      ctx.beginPath(); ctx.moveTo(x, isBar ? 4 : h - 9); ctx.lineTo(x, h); ctx.stroke();
+      if (isBar && (b / 4) % barEvery === 0) { ctx.fillStyle = '#b4b4bd'; ctx.fillText(String(b / 4 + 1), x + 4, 14); }
     }
     ruler.insertBefore(cv, ruler.firstChild);
   }
@@ -449,8 +459,8 @@ function updatePlayhead(follow = false) {
   const pos = engine.position;
   const x = pos * pps();
   $('#playhead').style.transform = `translateX(${headerW() + lead() + x}px)`;
-  $('#ph-tri').style.transform = `translateX(${x}px)`;
-  $('#t-now').textContent = fmtTime(pos);
+  const m = Math.floor(pos / 60), sec = pos - m * 60;
+  $('#t-now').innerHTML = `${String(m).padStart(2, '0')}:${String(Math.floor(sec)).padStart(2, '0')}<small>.${Math.floor((sec % 1) * 10)}</small>`;
   // Como en BandLab: la línea blanca se queda en medio y la canción corre por debajo.
   if (follow) setScroll(x);
 }
@@ -535,8 +545,7 @@ function zoomCenter(factor) {
   const tl = $('#timeline'), r = tl.getBoundingClientRect();
   zoomAround(pps() * factor, r.left + headerW() + (tl.clientWidth - headerW()) / 2, true);
 }
-$('#zoom-in').addEventListener('click', () => zoomCenter(1.5));
-$('#zoom-out').addEventListener('click', () => zoomCenter(1 / 1.5));
+
 
 (() => {
   const tl = $('#timeline');
@@ -605,21 +614,7 @@ $('#zoom-out').addEventListener('click', () => zoomCenter(1 / 1.5));
 })();
 window.addEventListener('resize', () => { if (S.project) { renderStudio(); setScroll(engine.position * pps()); } });
 
-// ---------- Columna de pistas: abrir / hacer chiquita ----------
-function applyHeaderMode() {
-  const st = $('#studio');
-  st.classList.toggle('collapsed', !!S.settings.collapsed);
-  st.style.setProperty('--header-w', headerW() + 'px');
-  $('#heads-icon').setAttribute('href', S.settings.collapsed ? '#ic-chev-right' : '#ic-chev-left');
-}
-$('#toggle-heads').addEventListener('click', () => {
-  S.settings.collapsed = !S.settings.collapsed;
-  saveSettings();
-  applyHeaderMode();
-  renderStudio();
-  setScroll(engine.position * pps());
-});
-applyHeaderMode();
+
 
 // =====================================================================
 // Estudio: toques y arrastre
@@ -633,7 +628,13 @@ $('#tracks').addEventListener('click', (e) => {
     return;
   }
   const head = e.target.closest('[data-head]');
-  if (head) { S.sel = { trackId: head.dataset.head, regionId: null }; renderStudio(); trackSheet(head.dataset.head); return; }
+  if (head) {
+    // Primer toque: selecciona la pista. Segundo toque: abre sus opciones.
+    const id = head.dataset.head;
+    if (S.sel.trackId === id) trackSheet(id);
+    else { S.sel = { trackId: id, regionId: null }; renderStudio(); }
+    return;
+  }
   const reg = e.target.closest('[data-region]');
   if (reg) { S.sel = { trackId: reg.dataset.track, regionId: reg.dataset.region }; renderStudio(); return; }
   const lane = e.target.closest('[data-lane]');
@@ -824,46 +825,121 @@ function addTrackSheet() {
   });
 }
 $('#add-track').addEventListener('click', addTrackSheet);
-$('#add-track-inline').addEventListener('click', addTrackSheet);
+$('#tb-mic').addEventListener('click', () => {
+  const t = makeTrack(S.project, 'VOCAL');
+  commit((p) => { p.tracks.push(t); }, { restart: false });
+  S.sel = { trackId: t.id, regionId: null };
+  renderStudio();
+  const tl = $('#timeline'); tl.scrollTo({ top: tl.scrollHeight, behavior: 'smooth' });
+  toast('Pista de voz lista: toca el botón rojo para grabar 🎙️');
+});
+$('#tb-metro').addEventListener('click', () => {
+  S.settings.metronome = engine.metronome = !S.settings.metronome;
+  saveSettings();
+  $('#tb-metro').classList.toggle('on', S.settings.metronome);
+  toast(S.settings.metronome ? 'Metrónomo encendido' : 'Metrónomo apagado');
+  if (engine.playing) startPlayback();
+});
+$('#tb-export').addEventListener('click', () => exportSong());
 
-// ---------- Mezclador ----------
-function mixerSheet() {
-  openSheet((el) => {
-    const p = S.project;
-    el.innerHTML = sheetHead('Mezclador') + `<div class="sheet-body">
-      ${rangeField('Volumen general', 'master', 0, 1.5, 0.01, p.masterVolume ?? 1, volToDb(p.masterVolume ?? 1) + ' dB')}
-      ${p.tracks.map((t) => `<div class="mixer-row">
-        <div class="bar" style="background:${t.color}"></div>
-        <div>
-          <div class="nm"><span>${esc(t.name)}</span><span class="sub" data-show="v-${t.id}">${volToDb(t.volume)} dB · ${fmtPan(t.pan)}</span></div>
-          <div class="mini"><span>Vol</span><input type="range" data-range="v-${t.id}" min="0" max="1.5" step="0.01" value="${t.volume}" aria-label="Volumen ${esc(t.name)}"></div>
-          <div class="mini"><span>Pan</span><input type="range" data-range="p-${t.id}" min="-1" max="1" step="0.02" value="${t.pan}" aria-label="Paneo ${esc(t.name)}"></div>
-        </div>
-        <div class="toggles" style="flex-direction:column">
-          <button class="toggle m ${t.muted ? 'on' : ''}" data-mm="${t.id}">M</button>
-          <button class="toggle s ${t.solo ? 'on' : ''}" data-ms="${t.id}">S</button>
-        </div>
-      </div>`).join('') || '<div class="empty">No hay pistas todavía.</div>'}
-    </div>`;
-    const handlers = { master: (v) => { p.masterVolume = v; engine.setMasterVolume(v); return volToDb(v) + ' dB'; } };
-    p.tracks.forEach((t) => {
-      const label = () => `${volToDb(t.volume)} dB · ${fmtPan(t.pan)}`;
-      handlers['v-' + t.id] = (v) => { t.volume = v; el.querySelector(`[data-show="v-${t.id}"]`).textContent = label(); };
-      handlers['p-' + t.id] = (v) => { t.pan = Math.abs(v) < 0.04 ? 0 : v; el.querySelector(`[data-show="v-${t.id}"]`).textContent = label(); };
-    });
-    bindRanges(el, handlers);
-    el.onclick = (e) => {
-      if (e.target.closest('[data-x]')) return closeSheet();
-      const m = e.target.closest('[data-mm]'), s = e.target.closest('[data-ms]');
-      if (m || s) {
-        const t = findTrack((m || s).dataset.mm || (m || s).dataset.ms);
-        commit(() => { if (m) t.muted = !t.muted; else t.solo = !t.solo; }, { restart: false });
-        refreshSheet();
-      }
-    };
-  });
+// ---------- Mezclador (panel de tarjetas de color, como en BandLab) ----------
+function knobSvg(pan) {
+  const dots = [-135, -90, -45, 0, 45, 90, 135].map((d) => {
+    const r = (d - 90) * Math.PI / 180;
+    return `<circle cx="${(24 + 21 * Math.cos(r)).toFixed(1)}" cy="${(24 + 21 * Math.sin(r)).toFixed(1)}" r="1.6" fill="#fff"/>`;
+  }).join('');
+  const ang = pan * 135;
+  return `<svg viewBox="0 0 48 48" class="knob-svg">${dots}<circle cx="24" cy="24" r="15.5" fill="#fff"/>
+    <line x1="24" y1="24" x2="24" y2="12" stroke="rgba(0,0,0,.8)" stroke-width="3" stroke-linecap="round" transform="rotate(${ang} 24 24)"/></svg>`;
 }
-$('#open-mixer').addEventListener('click', mixerSheet);
+function renderMixer() {
+  const p = S.project, panel = $('#mixer');
+  if (!p || !panel) return;
+  const scroll = panel.scrollTop;
+  panel.innerHTML = p.tracks.map((t, i) => `
+    <div class="mix-row ${t.muted ? 'muted' : ''}">
+      <div class="mix-card" style="background:${t.color}">
+        <div class="mc-top">
+          <span class="mc-num">${i + 1}</span>
+          <span class="mc-name">${esc(t.name)}</span>
+          <button class="mc-fx" data-mfx="${t.id}">${fxLabel(t)}</button>
+          <div class="mc-ms"><button class="${t.muted ? 'on' : ''}" data-mm="${t.id}" style="${t.muted ? `color:${shade(t.color, 0.6)}` : ''}">M</button><button class="${t.solo ? 'on' : ''}" data-ms="${t.id}" style="${t.solo ? `color:${shade(t.color, 0.6)}` : ''}">S</button></div>
+          <button class="mc-more" data-mmore="${t.id}" aria-label="Opciones de ${esc(t.name)}">${icon('ic-more')}</button>
+        </div>
+        <div class="mc-bottom">
+          <input type="range" class="mc-vol" data-mvol="${t.id}" min="0" max="1.5" step="0.01" value="${t.volume}" aria-label="Volumen de ${esc(t.name)}" style="--fill:${shade(t.color, 0.62)}">
+          <div class="knob" data-knob="${t.id}" role="slider" aria-label="Paneo de ${esc(t.name)}" aria-valuemin="-1" aria-valuemax="1" aria-valuenow="${t.pan}">
+            ${knobSvg(t.pan)}<span class="kl">L</span><span class="kr">R</span>
+          </div>
+        </div>
+      </div>
+      <button class="mix-icon" data-mhead="${t.id}" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}</button>
+    </div>`).join('') + `<div class="mix-row"><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
+  panel.scrollTop = scroll;
+  paintRanges(panel);
+}
+function toggleMixer(open = !S.mixerOpen) {
+  S.mixerOpen = open;
+  $('#mixer').classList.toggle('hidden', !open);
+  $('#open-mixer').classList.toggle('on', open);
+  if (open) renderMixer();
+}
+$('#open-mixer').addEventListener('click', () => toggleMixer());
+
+(() => {
+  const panel = $('#mixer');
+  panel.addEventListener('click', async (e) => {
+    const get = (attr) => { const el = e.target.closest(`[${attr}]`); return el && findTrack(el.getAttribute(attr)); };
+    let t;
+    if ((t = get('data-mm'))) return commit(() => { t.muted = !t.muted; }, { restart: false });
+    if ((t = get('data-ms'))) return commit(() => { t.solo = !t.solo; }, { restart: false });
+    if ((t = get('data-mfx'))) return effectsSheet(t.id);
+    if ((t = get('data-mmore'))) { S.sel = { trackId: t.id, regionId: null }; renderStudio(); return trackSheet(t.id); }
+    if ((t = get('data-mhead'))) { S.sel = { trackId: t.id, regionId: null }; return renderStudio(); }
+    if (e.target.closest('[data-a="master"]')) {
+      const v = await dialog({ title: 'Volumen general (dB)', value: volToDb(S.project.masterVolume ?? 1), type: 'number', ok: 'Guardar' });
+      if (v === null) return;
+      const db = clamp(Number(v), -40, 3.5);
+      if (Number.isFinite(db)) { S.project.masterVolume = Math.pow(10, db / 20); engine.setMasterVolume(S.project.masterVolume); touch(); renderMixer(); }
+    }
+  });
+  // Volumen
+  panel.addEventListener('pointerdown', (e) => { if (e.target.matches('.mc-vol')) beginLive(); });
+  panel.addEventListener('input', (e) => {
+    if (!e.target.matches('.mc-vol')) return;
+    beginLive();
+    findTrack(e.target.dataset.mvol).volume = parseFloat(e.target.value);
+    paintRanges(e.target.parentElement);
+    liveChange();
+  });
+  panel.addEventListener('change', (e) => { if (e.target.matches('.mc-vol')) endLive(); });
+  // Perilla de paneo: arrastra a los lados (o arriba/abajo); doble toque = al centro
+  let knob = null, lastTap = 0;
+  panel.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-knob]');
+    if (!el) return;
+    e.preventDefault();
+    const t = findTrack(el.dataset.knob);
+    const now = Date.now();
+    if (now - lastTap < 300) { beginLive(); t.pan = 0; liveChange(); endLive(); el.querySelector('svg').outerHTML = knobSvg(0); lastTap = 0; return; }
+    lastTap = now;
+    beginLive();
+    knob = { el, t, x: e.clientX, y: e.clientY, pan: t.pan };
+    el.setPointerCapture(e.pointerId);
+  });
+  panel.addEventListener('pointermove', (e) => {
+    if (!knob) return;
+    const d = (e.clientX - knob.x - (e.clientY - knob.y)) / 120;
+    let v = clamp(knob.pan + d, -1, 1);
+    if (Math.abs(v) < 0.04) v = 0;
+    knob.t.pan = v;
+    knob.el.querySelector('svg').outerHTML = knobSvg(v);
+    liveChange();
+  });
+  const endKnob = () => { if (knob) { knob = null; endLive(); } };
+  panel.addEventListener('pointerup', endKnob);
+  panel.addEventListener('pointercancel', endKnob);
+})();
 
 // ---------- Efectos ----------
 function fmtParam(def, v) {
@@ -903,27 +979,27 @@ function effectsSheet(trackId) {
     </div>`;
     const handlers = {};
     (t.effects || []).forEach((fx) => EFFECTS[fx.type].params.forEach((pd) => {
-      if (!pd.options) handlers[`${fx.id}:${pd.key}`] = (v) => { fx.params[pd.key] = v; return fmtParam(pd, v); };
+      if (!pd.options) handlers[`${fx.id}:${pd.key}`] = (v) => { fx.params[pd.key] = v; t.presetName = null; return fmtParam(pd, v); };
     }));
     bindRanges(el, handlers);
     el.querySelectorAll('[data-sel]').forEach((s) => s.addEventListener('change', () => {
       const [id, key] = s.dataset.sel.split(':');
       const fx = t.effects.find((x) => x.id === id);
-      commit(() => { fx.params[key] = s.value; }, { restart: false, render: false });
+      commit(() => { fx.params[key] = s.value; t.presetName = null; }, { restart: false, render: false });
     }));
     el.onclick = async (e) => {
       if (e.target.closest('[data-x]')) return closeSheet();
       const pr = e.target.closest('[data-preset]'), my = e.target.closest('[data-mypreset]');
       if (pr || my) {
         const preset = pr ? PRESETS[pr.dataset.preset] : mine[my.dataset.mypreset];
-        commit(() => { t.effects = preset.effects.map((x) => makeEffect(x.type, x.params)); }, { restart: false });
+        commit(() => { t.effects = preset.effects.map((x) => makeEffect(x.type, x.params)); t.presetName = preset.name; }, { restart: false });
         toast(`Preset "${preset.name}" aplicado`);
         return refreshSheet();
       }
       const tg = e.target.closest('[data-toggle]');
-      if (tg) { const fx = t.effects.find((x) => x.id === tg.dataset.toggle); commit(() => { fx.enabled = !fx.enabled; }, { restart: false }); return refreshSheet(); }
+      if (tg) { const fx = t.effects.find((x) => x.id === tg.dataset.toggle); commit(() => { fx.enabled = !fx.enabled; t.presetName = null; }, { restart: false }); return refreshSheet(); }
       const del = e.target.closest('[data-delfx]');
-      if (del) { commit(() => { t.effects = t.effects.filter((x) => x.id !== del.dataset.delfx); }, { restart: false }); return refreshSheet(); }
+      if (del) { commit(() => { t.effects = t.effects.filter((x) => x.id !== del.dataset.delfx); t.presetName = null; }, { restart: false }); return refreshSheet(); }
       const a = e.target.closest('[data-a]')?.dataset.a;
       if (a === 'add') addEffectSheet(trackId);
       if (a === 'save') {
@@ -944,7 +1020,7 @@ function addEffectSheet(trackId) {
       if (e.target.closest('[data-x]')) return effectsSheet(trackId);
       const b = e.target.closest('[data-fx]'); if (!b) return;
       const t = findTrack(trackId);
-      commit(() => { t.effects = [...(t.effects || []), makeEffect(b.dataset.fx)]; }, { restart: false });
+      commit(() => { t.effects = [...(t.effects || []), makeEffect(b.dataset.fx)]; t.presetName = null; }, { restart: false });
       effectsSheet(trackId);
     };
   });
@@ -1130,6 +1206,7 @@ async function openProject(p) {
   S.project = p;
   S.sel = { trackId: null, regionId: null };
   S.undo = []; S.redo = [];
+  toggleMixer(false);
   engine.startPos = 0;
   engine.chains.forEach((c) => { try { c.vol.disconnect(); c.pan.disconnect(); } catch (e) {} });
   engine.chains.clear();

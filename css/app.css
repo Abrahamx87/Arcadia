@@ -221,3 +221,93 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 
 /* Línea blanca fija en medio: espacio antes y después de la canción */
 .ruler, .lane { margin-left: var(--lead, 0px); }
+
+/* =====================================================================
+   v0.5 — Studio con el estilo de BandLab: bloques sólidos, ondas rellenas,
+   columna delgada de íconos y mezclador de tarjetas de color.
+   ===================================================================== */
+#studio { --header-w: 60px; --track-h: 90px; }
+.studio-top { border-bottom: 0; padding-bottom: 2px; }
+.tl-wrap { flex: 1; position: relative; min-height: 0; display: flex; }
+.timeline { background: #000; }
+.ruler-row { background: #000; border-bottom: 0; height: 30px; }
+.corner { background: #000; border-right: 0; justify-content: flex-start; padding: 0 0 0 8px; }
+#t-now { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); letter-spacing: .2px; white-space: nowrap; }
+#t-now small { color: var(--text-3); font-size: 12.5px; }
+.track-row { height: var(--track-h); border-bottom: 3px solid #000; }
+.track-head { flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #000; border-right: 0; }
+.track-head svg.i { width: 26px; height: 26px; }
+.fx-badge { font-size: 11px; font-weight: 800; font-style: italic; padding: 2px 7px; border-radius: 99px; line-height: 1.3; }
+.ms-badge { display: flex; gap: 4px; font-size: 10px; }
+.track-row.selected, .track-row.selected .track-head { background: #0b1a2c; }
+.lane { background-color: transparent; }
+.region { top: 0; bottom: 0; border-radius: 0; touch-action: pan-x pan-y; }
+.region.selected { box-shadow: 0 0 0 2px #fff inset; }
+.region canvas { top: 0; height: 100%; }
+.region.loading::after { color: rgba(255,255,255,.5); }
+.rec-region { top: 0; bottom: 0; border-radius: 0; }
+.playhead { width: 1.5px; z-index: 5; top: 12px; }
+.playhead::before, .playhead::after { content: ""; position: absolute; left: 50%; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; background: #fff; }
+.playhead::before { top: -4px; }
+.playhead::after { bottom: -4px; }
+
+/* Botón flotante para agregar pista */
+.fab-add { position: absolute; left: 8px; bottom: 10px; z-index: 6; width: 52px; height: 52px; border-radius: 16px;
+  background: #1b1b21; color: #fff; display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.6); }
+.fab-add svg.i { width: 30px; height: 30px; }
+.fab-add:active { background: #2a2a32; }
+
+/* Barra de herramientas y transporte */
+.bottom { border-top: 0; background: #000; }
+.editbar { border-bottom: 0; background: #111116; margin: 0 10px 6px; border-radius: 14px; }
+.toolbar { display: flex; align-items: center; gap: 10px; padding: 4px 12px 6px; }
+.tool-pill { display: flex; align-items: center; gap: 4px; background: #16161b; border-radius: 99px; padding: 5px 8px; }
+.tool-pill button { height: 38px; min-width: 42px; border-radius: 99px; display: grid; place-items: center; color: var(--text); padding: 0 8px; }
+.tool-pill button:active { background: #26262e; }
+.tool-text { display: flex !important; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; }
+.fx-tool i, .mc-fx i { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-style: italic; }
+.fx-tool i { font-size: 19px; }
+.round-btn { width: 48px; height: 48px; border-radius: 50%; background: #16161b; display: grid; place-items: center; color: var(--text); }
+.round-btn:active { background: #26262e; }
+.transport { justify-content: space-between; padding: 4px 12px 10px; gap: 0; }
+.tbtn { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: var(--text); flex: none; }
+.tbtn:disabled { color: #4a4a52; }
+.tbtn:active { background: #1b1b21; }
+.tbtn.on { background: #fff; color: #000; }
+.tbtn.play svg.i { width: 34px; height: 34px; }
+.rec-btn { width: 66px; height: 66px; border: 0; background: var(--record); }
+.rec-btn::after { width: 0; height: 0; background: #fff; }
+.rec-btn.on::after { width: 20px; height: 20px; border-radius: 4px; }
+
+/* Mezclador */
+.mixer { position: absolute; left: 0; right: 0; top: 30px; bottom: 0; z-index: 7; background: #000; overflow-y: auto;
+  padding: 0 0 80px; overscroll-behavior: contain; animation: fade .12s; }
+.mix-row { display: flex; align-items: stretch; margin-bottom: 4px; }
+.mix-card { flex: 1; min-width: 0; height: calc(var(--track-h) + 0px); border-radius: 0 10px 10px 0; padding: 10px 10px 8px 12px;
+  display: flex; flex-direction: column; justify-content: space-between; color: #fff; }
+.mix-row.muted .mix-card { filter: saturate(.35) brightness(.7); }
+.mc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mc-num { font-size: 14px; font-weight: 600; opacity: .9; flex: none; }
+.mc-name { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.mc-fx { flex: none; max-width: 42%; height: 30px; padding: 0 12px; border-radius: 99px; background: rgba(0,0,0,.18); color: #fff;
+  font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-fx i { font-size: 15px; margin-right: 2px; }
+.mc-ms { flex: none; display: flex; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.28); }
+.mc-ms button { width: 38px; height: 30px; font-weight: 600; font-size: 15px; color: #fff; }
+.mc-ms button + button { border-left: 1px solid rgba(0,0,0,.08); }
+.mc-ms button.on { background: #fff; }
+.mc-more { flex: none; width: 26px; height: 30px; display: grid; place-items: center; color: #fff; }
+.mc-bottom { display: flex; align-items: center; gap: 14px; padding-left: 6px; }
+.mc-vol { flex: 1; }
+.mc-vol::-webkit-slider-runnable-track { height: 3px; background: linear-gradient(90deg, #fff var(--p, 50%), var(--fill, rgba(0,0,0,.25)) var(--p, 50%)); }
+.mc-vol::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10.5px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.knob { position: relative; width: 48px; height: 48px; flex: none; touch-action: none; cursor: grab; }
+.knob-svg { width: 48px; height: 48px; display: block; }
+.knob .kl, .knob .kr { position: absolute; bottom: -6px; font-size: 11px; font-weight: 600; color: #fff; }
+.knob .kl { left: -2px; } .knob .kr { right: -2px; }
+.mix-icon { width: 60px; flex: none; display: grid; place-items: center; }
+.mix-icon svg.i { width: 26px; height: 26px; }
+.mix-master { margin: 8px 12px; padding: 12px 16px; border-radius: 12px; background: #16161b; color: var(--text-2); font-size: 13px; font-weight: 600; }
+.knob, .knob-svg { width: 44px; height: 44px; }
+.knob .kl, .knob .kr { bottom: -3px; font-size: 10px; }
+.mc-bottom { margin-top: -2px; }
