@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.14';
+const VERSION = '0.15';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -534,7 +534,9 @@ function updatePlayhead(follow = false, pos = engine.position) {
     if (engine.playing) {
       // Mientras suena, la canción se desliza con la tarjeta gráfica (transform), sin tocar el scroll:
       // es más fluido y funciona igual en todos los celulares. La línea blanca no se mueve nunca.
-      if (playBase === null) playBase = $('#timeline').scrollLeft;
+      // Se mide contra el scroll real en cada cuadro: si el celular movió el scroll por su cuenta
+      // (un deslizón que seguía de largo), se compensa al instante y nada brinca.
+      playBase = $('#timeline').scrollLeft;
       setFrac(playBase - x);
     } else {
       setFrac(0);
@@ -551,10 +553,32 @@ function setFrac(f) {
   fracEls.forEach((el) => { el.style.transform = v; });
 }
 /** Pasa lo que avanzó la canción al scroll real (al pausar, hacer zoom, etc.). */
+let scrollTarget = null, scrollGuardUntil = 0, userMoved = false;
 function settleScroll(pos = engine.position) {
   playBase = null;
   setFrac(0);
-  setScroll(pos * pps());
+  const x = pos * pps();
+  setScroll(x);
+  // La posición manda: si el celular ignora el scroll (pasa cuando el dedo acaba de tocar),
+  // lo volvemos a poner en los siguientes cuadros, en vez de dejar que la canción brinque para atrás.
+  scrollTarget = x; scrollGuardUntil = performance.now() + 450;
+  let n = 0;
+  const check = () => {
+    if (scrollTarget === null || userMoved || engine.playing) return;
+    const tl = $('#timeline');
+    if (Math.abs(tl.scrollLeft - scrollTarget) > 1) tl.scrollLeft = scrollTarget;
+    if (++n < 8) requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
+}
+/** Frena en seco cualquier deslizón que el celular siga moviendo por inercia. */
+function stopFling() {
+  const tl = $('#timeline');
+  const x = tl.scrollLeft;
+  tl.style.overflowX = 'hidden';
+  void tl.offsetWidth;
+  tl.style.overflowX = '';
+  tl.scrollLeft = x;
 }
 function setScroll(x) {
   const tl = $('#timeline');
@@ -582,7 +606,9 @@ function startPlayback() {
   engine.ensure();
   engine.setMasterVolume(S.project.masterVolume ?? 1);
   engine.setMastering(S.project.mastering);
+  stopFling();
   settleScroll(engine.position);
+  scrollTarget = null;
   playBase = $('#timeline').scrollLeft;
   engine.play(S.project, engine.position);
   $('#play-icon').setAttribute('href', '#ic-pause');
@@ -627,7 +653,7 @@ function zoomAround(newPps) {
   playBase = null;
   renderStudio();
   settleScroll(pos);
-  if (engine.playing) playBase = $('#timeline').scrollLeft - (engine.visualPosition() - pos) * S.pps;
+  if (engine.playing) scrollTarget = null;
   updatePlayhead();
 }
 
@@ -696,6 +722,7 @@ let pinch = null;
   const press = (e) => {
     if (excluded(e)) return;
     touching = true;
+    userMoved = false;
     clearTimeout(resumeTimer);
     if (engine.playing && !S.recording) { stopPlayback(); resumeAfter = true; }
   };
@@ -706,8 +733,20 @@ let pinch = null;
   window.addEventListener('touchcancel', release);
   window.addEventListener('mouseup', release);
   tl.addEventListener('wheel', (e) => { if (e.ctrlKey) return; press(e); touching = false; scheduleResume(); }, { passive: true });
+  // Primer movimiento del dedo: si el scroll no quedó donde debía, se acomoda antes de arrastrar.
+  tl.addEventListener('touchmove', (e) => {
+    if (!touching || userMoved || e.touches.length !== 1) return;
+    userMoved = true;
+    if (scrollTarget !== null && Math.abs(tl.scrollLeft - scrollTarget) > 1) tl.scrollLeft = scrollTarget;
+    scrollTarget = null;
+  }, { passive: true });
+  tl.addEventListener('mousemove', () => { if (touching) { userMoved = true; scrollTarget = null; } }, { passive: true });
   tl.addEventListener('scroll', () => {
     if (!S.project || S.recording || engine.playing || pinch) return;
+    // Justo después de pausar, los avisos de scroll "viejos" no pueden mover la canción.
+    if (scrollTarget !== null && !userMoved && performance.now() < scrollGuardUntil) {
+      if (Math.abs(tl.scrollLeft - scrollTarget) > 1) { tl.scrollLeft = scrollTarget; return; }
+    }
     engine.startPos = clamp(tl.scrollLeft / pps(), 0, timelineLength());
     updatePlayhead();
     if (resumeAfter && !touching) scheduleResume();

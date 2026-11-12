@@ -219,22 +219,32 @@ export class Engine {
   /** Posición suave para dibujar: usa el reloj de la pantalla en vez de los "saltitos" del reloj de audio. */
   visualPosition() {
     if (!this.playing || !this.ctx) return this.startPos;
+    const now = performance.now();
     const ts = this.ctx.getOutputTimestamp ? this.ctx.getOutputTimestamp() : null;
     let ctxTime;
     if (ts && ts.performanceTime > 0 && ts.contextTime > 0) {
-      ctxTime = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      ctxTime = ts.contextTime + (now - ts.performanceTime) / 1000;
     } else {
       ctxTime = this.ctx.currentTime;
     }
-    const p = this.startPos + (ctxTime - this.startCtxTime);
-    // Nunca va hacia atrás ni da brincos: suaviza contra la última posición dibujada.
-    if (this._lastVis !== undefined && p < this._lastVis && this._lastVis - p < 0.05) return this._lastVis;
-    this._lastVis = Math.max(this.startPos, p);
-    return this._lastVis;
+    const audio = this.startPos + (ctxTime - this.startCtxTime);
+    if (audio <= this.startPos) return this.startPos;
+    // Reloj liso: avanza con el reloj de la pantalla (parejito, sin saltos) y se va
+    // corrigiendo poquito a poco contra el reloj del audio, que en Android avanza "a brincos".
+    const c = this._clk;
+    if (!c) { this._clk = { base: audio, t: now }; this._lastVis = audio; return audio; }
+    let p = c.base + (now - c.t) / 1000;
+    const err = audio - p;
+    if (Math.abs(err) > 0.25) { c.base = audio; c.t = now; p = audio; }
+    else { c.base += err * 0.03; p += err * 0.03; }
+    if (p < this._lastVis) p = this._lastVis; // nunca hacia atrás
+    this._lastVis = p;
+    return p;
   }
 
   play(project, from) {
     this._lastVis = undefined;
+    this._clk = null;
     const ctx = this.ensure();
     this.stopSources();
     this.syncMix(project);
