@@ -1,7 +1,7 @@
 // Arcadia — motor de audio (Web Audio API).
 // Pistas -> efectos -> volumen -> paneo -> master -> limitador -> bocinas.
 
-import { EFFECTS } from './effects.js';
+import { EFFECTS, makeImpulse } from './effects.js';
 import { loadAudio } from './store.js';
 
 const dbToGain = (db) => Math.pow(10, db / 20);
@@ -28,23 +28,53 @@ export class Engine {
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AC({ latencyHint: 'interactive' });
-      const m = this.buildMaster(this.ctx);
-      this.master = m.master;
-      this.masterIn = m.input;
+      // 'playback': el cel usa un búfer de audio más grande → no se traba ni truena con muchas pistas.
+      // El retraso extra se compensa solo al grabar (ver recordLatency).
+      this.ctx = new AC({ latencyHint: 'playback' });
+      this.ms = this.buildMaster(this.ctx);
+      this.master = this.ms.master;
+      this.masterIn = this.ms.input;
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return this.ctx;
   }
 
+  /**
+   * Master: margen de volumen → volumen general → compresor/limitador → recorte suave.
+   * El recorte suave evita los "tronidos" de saturación digital cuando muchas pistas suman demasiado.
+   */
   buildMaster(ctx) {
     const input = ctx.createGain();
+    input.gain.value = 0.8;                    // margen (headroom) para sumar muchas pistas
     const master = ctx.createGain();
-    const limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -1; limiter.knee.value = 0; limiter.ratio.value = 20;
-    limiter.attack.value = 0.002; limiter.release.value = 0.1;
-    input.connect(master).connect(limiter).connect(ctx.destination);
-    return { input, master };
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -6; comp.knee.value = 4; comp.ratio.value = 10;
+    comp.attack.value = 0.003; comp.release.value = 0.2;
+    const clip = ctx.createWaveShaper();
+    clip.curve = softClipCurve();
+    clip.oversample = 'none';                  // sin rebote del filtro: el techo de 0.97 se respeta exacto
+    const half = ctx.createGain(); half.gain.value = 0.5;   // la curva cubre ±2 → entra a la mitad
+    input.connect(master).connect(comp).connect(half).connect(clip).connect(ctx.destination);
+    return { ctx, input, master, reverbs: new Map() };
+  }
+
+  /** Reverb compartida por tipo: una sola para todas las pistas (mucho más ligera que una por pista). */
+  reverbBus(ms, type) {
+    if (ms.reverbs.has(type)) return ms.reverbs.get(type);
+    const ctx = ms.ctx;
+    const inp = ctx.createGain();
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 180;
+    const conv = ctx.createConvolver();
+    conv.buffer = makeImpulse(ctx, type);
+    inp.connect(hp).connect(conv).connect(ms.input);
+    ms.reverbs.set(type, inp);
+    return inp;
+  }
+
+  /** Retraso real de la salida de audio (para que la voz grabada quede en su lugar). */
+  recordLatency() {
+    if (!this.ctx) return 0;
+    return (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0);
   }
 
   setMasterVolume(v) { if (this.master) this.master.gain.value = v; }
@@ -90,24 +120,49 @@ export class Engine {
   }
 
   // ---------- Cadena de cada pista ----------
-  buildChain(ctx, track, dest) {
+  buildChain(ms, track) {
+    const ctx = ms.ctx;
     const input = ctx.createGain();
     const vol = ctx.createGain();
     const pan = ctx.createStereoPanner();
-    vol.connect(pan).connect(dest);
-    const chain = { input, vol, pan, fx: [], sig: '' };
+    vol.connect(pan).connect(ms.input);
+    const chain = { ms, input, vol, pan, fx: [], sig: '' };
     this.wireEffects(ctx, chain, track);
     return chain;
   }
 
+  /** La reverb de una pista: la señal sigue seca por la cadena y una parte se "envía" a la reverb compartida. */
+  reverbSend(chain) {
+    const ctx = chain.ms.ctx;
+    const dry = ctx.createGain(), send = ctx.createGain();
+    chain.pan.connect(send);
+    let type = null;
+    return {
+      input: dry, output: dry, send,
+      set: (p) => {
+        const mix = p.mix / 100;
+        dry.gain.value = 1 - mix * 0.5;
+        send.gain.value = mix * 1.4;
+        if (p.type !== type) {
+          try { send.disconnect(); } catch (e) {}
+          send.connect(this.reverbBus(chain.ms, p.type));
+          type = p.type;
+        }
+      },
+    };
+  }
+
   wireEffects(ctx, chain, track) {
     chain.input.disconnect();
-    chain.fx.forEach((f) => { try { f.node.output.disconnect(); } catch (e) {} });
+    chain.fx.forEach((f) => {
+      try { f.node.output.disconnect(); } catch (e) {}
+      if (f.node.send) { try { chain.pan.disconnect(f.node.send); f.node.send.disconnect(); } catch (e) {} }
+    });
     chain.fx = [];
     let last = chain.input;
     (track.effects || []).forEach((e) => {
       if (!e.enabled || !EFFECTS[e.type]) return;
-      const node = EFFECTS[e.type].build(ctx);
+      const node = e.type === 'reverb' ? this.reverbSend(chain) : EFFECTS[e.type].build(ctx);
       node.set(e.params);
       last.connect(node.input);
       last = node.output;
@@ -124,7 +179,7 @@ export class Engine {
     const now = this.ctx.currentTime;
     project.tracks.forEach((t) => {
       let chain = this.chains.get(t.id);
-      if (!chain) { chain = this.buildChain(this.ctx, t, this.masterIn); this.chains.set(t.id, chain); }
+      if (!chain) { chain = this.buildChain(this.ms, t); this.chains.set(t.id, chain); }
       const audible = !t.muted && (!anySolo || t.solo);
       chain.vol.gain.setTargetAtTime(audible ? t.volume : 0, now, 0.015);
       chain.pan.pan.setTargetAtTime(t.pan, now, 0.015);
@@ -276,10 +331,10 @@ export class Engine {
     const rate = 44100;
     const length = Math.ceil((end + 1.5) * rate);
     const ctx = new OfflineAudioContext(2, length, rate);
-    const { input } = this.buildMaster(ctx);
+    const ms = this.buildMaster(ctx);
     const anySolo = project.tracks.some((t) => t.solo);
     project.tracks.forEach((t) => {
-      const chain = this.buildChain(ctx, t, input);
+      const chain = this.buildChain(ms, t);
       chain.vol.gain.value = !t.muted && (!anySolo || t.solo) ? t.volume : 0;
       chain.pan.pan.value = t.pan;
       t.regions.forEach((r) => {
@@ -305,6 +360,17 @@ export function projectEnd(project) {
 
 function effectSignature(track) {
   return (track.effects || []).filter((e) => e.enabled).map((e) => e.id + e.type).join('|');
+}
+
+function softClipCurve() {
+  // La entrada se interpreta en el rango ±2: hasta 0.9 pasa limpia y arriba se redondea con suavidad hacia 1.
+  const n = 4096, c = new Float32Array(n), knee = 0.9;
+  for (let i = 0; i < n; i++) {
+    const x = ((i / (n - 1)) * 2 - 1) * 2, a = Math.abs(x);
+    const y = a <= knee ? a : knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee));
+    c[i] = Math.sign(x) * y * 0.97;          // techo en 0.97: nunca toca el máximo digital
+  }
+  return c;
 }
 
 // ---------- Forma de onda ----------

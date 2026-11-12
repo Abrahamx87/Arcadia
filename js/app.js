@@ -17,7 +17,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.11';
+const VERSION = '0.12';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1105,10 +1105,10 @@ function effectsSheet(trackId) {
                 <input type="range" data-range="${fx.id}:${pd.key}" min="${pd.min}" max="${pd.max}" step="${pd.step}" value="${fx.params[pd.key]}"></div>`).join('')}
         </div>`;
       }).join('') || '<div class="empty" style="padding:20px">Sin efectos. Elige un preset de arriba o agrega uno.</div>'}
-      <div class="row-btns">
-        <button class="btn primary" data-a="add">${icon('ic-add', 'sm')}Agregar efecto</button>
-        <button class="btn" data-a="save">${icon('ic-save', 'sm')}Guardar preset</button>
-      </div>
+    </div>
+    <div class="sheet-foot row-btns">
+      <button class="btn primary" data-a="add">${icon('ic-add', 'sm')}Agregar efecto</button>
+      <button class="btn" data-a="save">${icon('ic-save', 'sm')}Guardar preset</button>
     </div>`;
     const handlers = {};
     (t.effects || []).forEach((fx) => EFFECTS[fx.type].params.forEach((pd) => {
@@ -1266,7 +1266,7 @@ async function toggleRecord() {
       const audioId = uid();
       const buf = await engine.addBuffer(audioId, await blob.arrayBuffer());
       await store.saveAudio(audioId, blob, 'grabacion');
-      const lat = S.settings.latencyMs / 1000;
+      const lat = S.settings.latencyMs / 1000 + engine.recordLatency();
       const t = findTrack(rec.trackId);
       const n = t.regions.length + 1;
       commit(() => {

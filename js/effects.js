@@ -7,14 +7,14 @@ const dbToGain = (db) => Math.pow(10, db / 20);
 export const REVERB_TYPES = {
   room:      { label: 'Cuarto pequeño',   seconds: 0.7, decay: 3.0, bright: 0.55, pre: 0.005 },
   institute: { label: 'Sala mediana',     seconds: 1.6, decay: 2.6, bright: 0.45, pre: 0.012 },
-  hall:      { label: 'Sala grande',      seconds: 2.8, decay: 2.2, bright: 0.40, pre: 0.020 },
-  cathedral: { label: 'Catedral',         seconds: 5.0, decay: 1.8, bright: 0.35, pre: 0.030 },
+  hall:      { label: 'Sala grande',      seconds: 2.4, decay: 2.2, bright: 0.40, pre: 0.020 },
+  cathedral: { label: 'Catedral',         seconds: 3.6, decay: 1.8, bright: 0.35, pre: 0.030 },
   plate:     { label: 'Plate (placa)',    seconds: 1.9, decay: 2.4, bright: 0.85, pre: 0.000 },
   spring:    { label: 'Resorte vintage',  seconds: 1.5, decay: 2.8, bright: 0.65, pre: 0.000, spring: true },
 };
 
 const impulseCache = new Map();
-function makeImpulse(ctx, typeKey) {
+export function makeImpulse(ctx, typeKey) {
   const cacheKey = typeKey + '@' + ctx.sampleRate;
   if (impulseCache.has(cacheKey) && ctx instanceof AudioContext) return impulseCache.get(cacheKey);
   const t = REVERB_TYPES[typeKey] || REVERB_TYPES.institute;
