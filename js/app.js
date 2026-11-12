@@ -17,7 +17,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.12';
+const VERSION = '0.13';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -989,7 +989,7 @@ function renderMixer() {
         </div>
       </div>
       <button class="mix-icon" data-mhead="${t.id}" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}</button>
-    </div>`).join('') + `<div class="mix-row" style="--i:${p.tracks.length}"><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
+    </div>`).join('') + `<div class="mix-row" style="--i:${p.tracks.length}"><button class="mix-master level" data-a="level">${icon('ic-sparkle', 'sm')}Nivelar volumen</button><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
   panel.scrollTop = scroll;
   paintRanges(panel);
 }
@@ -1029,6 +1029,7 @@ $('#open-mixer').addEventListener('click', () => toggleMixer());
     if ((t = get('data-mfx'))) return effectsSheet(t.id);
     if ((t = get('data-mmore'))) { S.sel = { trackId: t.id, regionId: null }; renderStudio(); return trackSheet(t.id); }
     if ((t = get('data-mhead'))) { S.sel = { trackId: t.id, regionId: null }; return renderStudio(); }
+    if (e.target.closest('[data-a="level"]')) return levelSheet();
     if (e.target.closest('[data-a="master"]')) {
       const v = await dialog({ title: 'Volumen general (dB)', value: volToDb(S.project.masterVolume ?? 1), type: 'number', ok: 'Guardar' });
       if (v === null) return;
@@ -1164,6 +1165,80 @@ $('#open-fx').addEventListener('click', () => {
   effectsSheet(id);
 });
 
+// ---------- Nivelar volumen ----------
+// Mide la sonoridad real (LUFS) de cada pista y ajusta su ganancia para que todas suenen igual de fuerte.
+const levelPick = new Set();
+function levelSheet() {
+  const p = S.project;
+  const withAudio = p.tracks.filter((t) => t.regions.length);
+  if (withAudio.length < 1) return toast('Primero agrega audio a tus pistas');
+  levelPick.clear();
+  withAudio.forEach((t) => levelPick.add(t.id));
+  openSheet((el) => {
+    el.innerHTML = sheetHead('Nivelar volumen') + `<div class="sheet-body">
+      <p class="sub" style="margin:0 0 12px;line-height:1.5">Arcadia escucha cada pista y mide qué tan fuerte la percibe el oído (LUFS, el mismo estándar de Spotify y YouTube). Luego sube o baja cada una para que todas queden al mismo nivel.</p>
+      <div class="sub" style="margin:4px 0 6px">Pistas a nivelar</div>
+      ${withAudio.map((t) => `<button class="sheet-item lv-item" data-pick="${t.id}">
+        <span class="lv-check ${levelPick.has(t.id) ? 'on' : ''}" style="--c:${t.color}"></span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</span>
+        <span class="hint" data-lv="${t.id}"></span></button>`).join('')}
+    </div>
+    <div class="sheet-foot row-btns">
+      <button class="btn" data-a="measure">Solo medir</button>
+      <button class="btn primary" data-a="go">${icon('ic-sparkle', 'sm')}Nivelar</button>
+    </div>`;
+    el.onclick = async (e) => {
+      if (e.target.closest('[data-x]')) return closeSheet();
+      const pk = e.target.closest('[data-pick]');
+      if (pk) {
+        const id = pk.dataset.pick;
+        levelPick.has(id) ? levelPick.delete(id) : levelPick.add(id);
+        pk.querySelector('.lv-check').classList.toggle('on', levelPick.has(id));
+        return;
+      }
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'measure' || a === 'go') runLevel(el, a === 'go');
+    };
+  });
+}
+
+async function runLevel(el, apply) {
+  const p = S.project;
+  const picked = p.tracks.filter((t) => levelPick.has(t.id) && t.regions.length);
+  if (apply && picked.length < 2) return toast('Elige al menos 2 pistas para nivelarlas entre sí');
+  if (!picked.length) return toast('Elige al menos una pista');
+  if (engine.playing) stopPlayback();
+  const done = busy('Escuchando tus pistas…');
+  let results;
+  try {
+    results = [];
+    for (const t of picked) results.push({ t, lufs: await engine.trackLoudness(t) });
+  } catch (err) {
+    console.error(err); done(); return toast('No se pudo analizar el audio');
+  }
+  done();
+  const valid = results.filter((r) => Number.isFinite(r.lufs));
+  // Meta: el promedio de las pistas elegidas → todas quedan iguales sin cambiar mucho el volumen total.
+  const target = valid.reduce((a, r) => a + r.lufs, 0) / Math.max(1, valid.length);
+  results.forEach((r) => {
+    const span = el.querySelector(`[data-lv="${r.t.id}"]`);
+    if (!span) return;
+    if (!Number.isFinite(r.lufs)) { span.textContent = 'Silencio'; return; }
+    const change = clamp(target - r.lufs, -20, 20);
+    span.innerHTML = apply
+      ? `${r.lufs.toFixed(1)} LUFS → <b style="color:${Math.abs(change) < 0.5 ? 'var(--text-2)' : change > 0 ? 'var(--sync)' : 'var(--mute)'}">${change >= 0 ? '+' : ''}${change.toFixed(1)} dB</b>`
+      : `${r.lufs.toFixed(1)} LUFS`;
+  });
+  if (!apply) return toast(valid.length > 1 ? `Diferencia entre la más fuerte y la más bajita: ${(Math.max(...valid.map((r) => r.lufs)) - Math.min(...valid.map((r) => r.lufs))).toFixed(1)} dB` : 'Medición lista');
+  commit(() => {
+    valid.forEach((r) => {
+      const factor = Math.pow(10, clamp(target - r.lufs, -20, 20) / 20);
+      r.t.regions.forEach((reg) => { reg.gain = clamp((reg.gain ?? 1) * factor, 0.05, 10); });
+    });
+  }, { restart: true });
+  toast(`¡Listo! ${valid.length} pistas niveladas a ${target.toFixed(1)} LUFS ✨`);
+}
+
 // ---------- Menú del proyecto ----------
 function projectSheet() {
   openSheet((el) => {
@@ -1175,6 +1250,7 @@ function projectSheet() {
       <button class="sheet-item" data-a="snap">${icon('ic-tune')}Ajustar a la cuadrícula<span class="switch ${S.settings.snap ? 'on' : ''}" style="margin-left:auto"></span></button>
       ${rangeField('Compensar retraso al grabar', 'lat', 0, 400, 5, S.settings.latencyMs, S.settings.latencyMs + ' ms')}
       <div class="sub" style="margin:-4px 0 10px">Si tu voz grabada queda atrasada respecto a la pista, súbelo poco a poco.</div>
+      <button class="sheet-item" data-a="level">${icon('ic-sparkle')}Nivelar volumen de las pistas</button>
       <button class="sheet-item" data-a="export">${icon('ic-download')}Exportar canción (WAV)</button>
       <button class="sheet-item" data-a="sync">${icon('ic-cloud-up')}Sincronizar con Abraham IA Music<span class="hint">Pronto</span></button>
       <div class="sub" style="text-align:center;padding:14px 0 4px">Arcadia v${VERSION}</div>
@@ -1195,6 +1271,7 @@ function projectSheet() {
       if (a === 'metro') { S.settings.metronome = engine.metronome = !S.settings.metronome; saveSettings(); refreshSheet(); if (engine.playing) startPlayback(); }
       if (a === 'snap') { S.settings.snap = !S.settings.snap; saveSettings(); refreshSheet(); }
       if (a === 'export') { closeSheet(); exportSong(); }
+      if (a === 'level') levelSheet();
       if (a === 'sync') toast(SOON.sync);
     };
   });

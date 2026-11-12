@@ -323,6 +323,46 @@ export class Engine {
     });
   }
 
+  // ---------- Nivelar volumen (sonoridad LUFS, estándar ITU BS.1770 / EBU R128) ----------
+  /** Energía de bloques de 400 ms de una región, filtrada como la escucha el oído (K-weighting). */
+  async loudnessBlocks(r) {
+    const buf = await this.getBuffer(r.audioId);
+    const sr = 24000;
+    const len = Math.max(1, Math.ceil(Math.min(r.length, buf.duration - r.offset) * sr));
+    const ctx = new OfflineAudioContext(buf.numberOfChannels, len, sr);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = 1681; shelf.gain.value = 4;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 38; hp.Q.value = 0.5;
+    src.connect(shelf).connect(hp).connect(ctx.destination);
+    src.start(0, r.offset, r.length);
+    const out = await ctx.startRendering();
+    // Sumas acumuladas de x² para medir cada bloque al instante
+    const n = out.length, cum = new Float64Array(n + 1);
+    for (let c = 0; c < out.numberOfChannels; c++) {
+      const d = out.getChannelData(c);
+      let acc = 0;
+      for (let i = 0; i < n; i++) { acc += d[i] * d[i]; cum[i + 1] += acc; }
+    }
+    const g2 = Math.pow(r.gain ?? 1, 2);
+    const block = Math.round(0.4 * sr), hop = Math.round(0.1 * sr), blocks = [];
+    if (n < block) blocks.push((cum[n] / n) * g2);
+    for (let s0 = 0; s0 + block <= n; s0 += hop) blocks.push(((cum[s0 + block] - cum[s0]) / block) * g2);
+    return blocks;
+  }
+
+  /** Sonoridad integrada en LUFS de una pista (todas sus regiones juntas). -Infinity si está en silencio. */
+  async trackLoudness(track) {
+    let blocks = [];
+    for (const r of track.regions) blocks = blocks.concat(await this.loudnessBlocks(r));
+    const L = (ms) => -0.691 + 10 * Math.log10(ms);
+    const abs = blocks.filter((ms) => ms > 0 && L(ms) > -70);          // compuerta absoluta: quita silencios
+    if (!abs.length) return -Infinity;
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const rel = L(mean(abs)) - 10;                                       // compuerta relativa: quita partes muy bajitas
+    const gated = abs.filter((ms) => L(ms) > rel);
+    return L(mean(gated.length ? gated : abs));
+  }
+
   // ---------- Exportar ----------
   async exportWav(project) {
     await this.loadProject(project);

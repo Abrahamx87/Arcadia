@@ -417,3 +417,11 @@ html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom
   -webkit-overflow-scrolling: touch; }
 .sheet-foot { flex: none; margin: 0 !important; padding: 10px 16px 14px; background: var(--panel); border-top: 1px solid var(--line); }
 .sheet-body input[type=range] { touch-action: pan-y; }   /* deslizar hacia arriba/abajo sobre un control sí mueve la hoja */
+
+/* v0.13 — Nivelar volumen */
+.lv-item { gap: 14px; }
+.lv-check { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--c); flex: none; position: relative; }
+.lv-check.on { background: var(--c); }
+.lv-check.on::after { content: ""; position: absolute; left: 6px; top: 2px; width: 6px; height: 11px; border: solid #000; border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
+.mix-row:last-child { flex-wrap: wrap; }
+.mix-master.level { display: flex; align-items: center; gap: 8px; color: #fff; background: linear-gradient(120deg, var(--accent), var(--accent-2)); }
