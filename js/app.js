@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.15';
+const VERSION = '0.16';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -461,13 +461,18 @@ function drawTile(cv) {
     const b = Math.min(n, Math.max(a + 1, Math.floor((t0 + secPerPx) * pk.rate)));
     let m = 0;
     for (let i = a; i < b; i++) { const v = pk.max[i] > -pk.min[i] ? pk.max[i] : -pk.min[i]; if (v > m) m = v; }
-    amp[x] = Math.min(1, m * (r.gain ?? 1) * norm) * half;
+    const g = m * (r.gain ?? 1);
+    // Ruiditos muy bajos (como un soplido o un clic) se marcan un poquito más para que no se escondan.
+    const db = g > 0 ? 20 * Math.log10(g) : -120;
+    const low = Math.min(1, Math.max(0, (db + 60) / 60)) * 0.12;
+    amp[x] = Math.max(Math.min(1, g * norm), low) * half;
   }
-  // Suavizado ligero + grosor mínimo: los silencios se ven como una franja, como en BandLab.
-  const minBand = Math.max(1.5 * dpr, half * 0.06);
+  // Silencio = línea finita como un pelo (como en BandLab). Suavizado mínimo para no borrar ruiditos.
+  const minBand = 0.5 * dpr;
+  const raw = amp.slice();
   for (let x = 0; x <= W; x++) {
-    const v = (amp[Math.max(0, x - 1)] + amp[x] * 2 + amp[Math.min(W, x + 1)]) / 4;
-    amp[x] = Math.max(minBand, v);
+    const v = (raw[Math.max(0, x - 1)] + raw[x] * 2 + raw[Math.min(W, x + 1)]) / 4;
+    amp[x] = Math.max(minBand, v, raw[x] * 0.85);
   }
   ctx.fillStyle = color;
   ctx.beginPath();
