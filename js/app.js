@@ -2,6 +2,8 @@
 import * as store from './store.js';
 import { Engine, projectEnd, DEMO } from './engine.js';
 import { EFFECTS, PRESETS, defaultParams } from './effects.js';
+import { MASTER_PRESETS, defaultMastering } from './master.js';
+import { effectsFromWords, WORD_EXAMPLES } from './wordfx.js';
 
 // =====================================================================
 // Constantes y utilidades
@@ -17,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.13';
+const VERSION = '0.14';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -105,7 +107,7 @@ function touch(project = S.project) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => store.saveProject(project), 250);
 }
-const snapshot = () => JSON.stringify({ title: S.project.title, bpm: S.project.bpm, tracks: S.project.tracks });
+const snapshot = () => JSON.stringify({ title: S.project.title, bpm: S.project.bpm, tracks: S.project.tracks, mastering: S.project.mastering || null, masterVolume: S.project.masterVolume ?? 1 });
 
 /** Cambia el proyecto con opción de deshacer. */
 function commit(fn, { restart = true, render = true } = {}) {
@@ -128,6 +130,8 @@ function restore(json) {
   const t = S.project.tracks;
   if (!t.some((x) => x.id === S.sel.trackId)) S.sel = { trackId: null, regionId: null };
   if (S.sel.regionId && !t.some((x) => x.regions.some((r) => r.id === S.sel.regionId))) S.sel.regionId = null;
+  engine.setMastering(S.project.mastering);
+  engine.setMasterVolume(S.project.masterVolume ?? 1);
   afterChange(true, true);
   refreshSheet();
 }
@@ -151,7 +155,7 @@ let toastTimer;
 function toast(msg) {
   document.querySelectorAll('.toast').forEach((t) => t.remove());
   const el = document.createElement('div');
-  el.className = 'toast' + (S.project ? '' : ' low');
+  el.className = 'toast' + ($('#overlay .scrim:not(.closing)') ? ' top' : S.project ? '' : ' low');
   el.textContent = msg;
   document.body.appendChild(el);
   clearTimeout(toastTimer);
@@ -386,6 +390,7 @@ function renderStudio() {
   updateUndoButtons();
   if (S.mixerOpen) renderMixer();
   $('#tb-metro').classList.toggle('on', !!S.settings.metronome);
+  paintMasterBtn();
 }
 
 function gridBg(p, scale) {
@@ -576,6 +581,7 @@ function tick() {
 function startPlayback() {
   engine.ensure();
   engine.setMasterVolume(S.project.masterVolume ?? 1);
+  engine.setMastering(S.project.mastering);
   settleScroll(engine.position);
   playBase = $('#timeline').scrollLeft;
   engine.play(S.project, engine.position);
@@ -602,7 +608,7 @@ function seek(sec) {
 $('#play').addEventListener('click', async () => {
   if (S.recording) return toggleRecord();
   if (engine.playing) return stopPlayback();
-  engine.ensure();
+  await engine.ready();
   await engine.loadProject(S.project);
   startPlayback();
 });
@@ -989,7 +995,7 @@ function renderMixer() {
         </div>
       </div>
       <button class="mix-icon" data-mhead="${t.id}" style="color:${t.color}">${icon(TYPES[t.type]?.icon || 'ic-other')}</button>
-    </div>`).join('') + `<div class="mix-row" style="--i:${p.tracks.length}"><button class="mix-master level" data-a="level">${icon('ic-sparkle', 'sm')}Nivelar volumen</button><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
+    </div>`).join('') + `<div class="mix-row" style="--i:${p.tracks.length}"><button class="mix-master level" data-a="automix">${icon('ic-sparkle', 'sm')}Mezcla automática</button><button class="mix-master" data-a="level">Nivelar volumen</button><button class="mix-master" data-a="master">Volumen general · ${volToDb(p.masterVolume ?? 1)} dB</button></div>`;
   panel.scrollTop = scroll;
   paintRanges(panel);
 }
@@ -1030,6 +1036,7 @@ $('#open-mixer').addEventListener('click', () => toggleMixer());
     if ((t = get('data-mmore'))) { S.sel = { trackId: t.id, regionId: null }; renderStudio(); return trackSheet(t.id); }
     if ((t = get('data-mhead'))) { S.sel = { trackId: t.id, regionId: null }; return renderStudio(); }
     if (e.target.closest('[data-a="level"]')) return levelSheet();
+    if (e.target.closest('[data-a="automix"]')) return autoMixSheet();
     if (e.target.closest('[data-a="master"]')) {
       const v = await dialog({ title: 'Volumen general (dB)', value: volToDb(S.project.masterVolume ?? 1), type: 'number', ok: 'Guardar' });
       if (v === null) return;
@@ -1087,6 +1094,13 @@ function effectsSheet(trackId) {
     if (!t) return closeSheet();
     const mine = S.settings.myPresets || [];
     el.innerHTML = sheetHead(`<span style="color:${t.color}">●</span> Efectos · ${esc(t.name)}`) + `<div class="sheet-body">
+      <form class="word-box" data-words>
+        <div class="word-label">${icon('ic-sparkle', 'sm')} Pídelo con palabras</div>
+        <div class="word-row"><input class="text-input" name="w" placeholder="Ej. voz trap con mucho eco" autocomplete="off" maxlength="120">
+          <button class="btn primary" type="submit">Crear</button></div>
+        <div class="word-examples">${WORD_EXAMPLES.map((x) => `<button type="button" class="word-ex" data-ex="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      </form>
+      <div class="sub" style="margin:6px 0 8px">O elige un preset</div>
       <div class="preset-row">
         ${PRESETS.map((p, i) => `<button class="preset" data-preset="${i}">${esc(p.name)}</button>`).join('')}
         ${mine.map((p, i) => `<button class="preset" data-mypreset="${i}" style="box-shadow:0 0 0 1px ${t.color} inset">★ ${esc(p.name)}</button>`).join('')}
@@ -1116,6 +1130,19 @@ function effectsSheet(trackId) {
       if (!pd.options) handlers[`${fx.id}:${pd.key}`] = (v) => { fx.params[pd.key] = v; t.presetName = null; return fmtParam(pd, v); };
     }));
     bindRanges(el, handlers);
+    const applyWords = (text) => {
+      const words = text.trim();
+      if (!words) return toast('Escribe cómo quieres que suene');
+      const { effects, notes } = effectsFromWords(words);
+      commit(() => {
+        t.effects = effects.map((x) => makeEffect(x.type, x.params));
+        t.presetName = words.charAt(0).toUpperCase() + words.slice(1, 28);
+      }, { restart: false });
+      toast(`Listo: ${effects.map((x) => EFFECTS[x.type].label).join(' + ')}${notes.length ? ' · ' + notes.join(', ') : ''}`);
+      refreshSheet();
+    };
+    el.querySelector('[data-words]').addEventListener('submit', (e) => { e.preventDefault(); applyWords(e.target.w.value); });
+    el.querySelectorAll('[data-ex]').forEach((b) => b.addEventListener('click', () => { el.querySelector('[data-words] input').value = b.dataset.ex; applyWords(b.dataset.ex); }));
     el.querySelectorAll('[data-sel]').forEach((s) => s.addEventListener('change', () => {
       const [id, key] = s.dataset.sel.split(':');
       const fx = t.effects.find((x) => x.id === id);
@@ -1239,6 +1266,133 @@ async function runLevel(el, apply) {
   toast(`¡Listo! ${valid.length} pistas niveladas a ${target.toFixed(1)} LUFS ✨`);
 }
 
+// ---------- Mezcla automática: "acomodar a todos en el escenario" ----------
+// Cada pista tiene un papel: la voz principal va al frente y en medio, los coros un poco más bajitos
+// y a los lados, el beat atrás en medio… Arcadia mide cada pista y ajusta volumen y paneo.
+const ROLES = {
+  lead:   { label: 'Voz principal', db: 0, pans: [0] },
+  vocal2: { label: 'Segunda voz / dueto', db: -1.5, pans: [-0.2, 0.2] },
+  choir:  { label: 'Coros / adlibs', db: -6, pans: [-0.45, 0.45] },
+  inst:   { label: 'Instrumental / beat', db: -2, pans: [0] },
+  drums:  { label: 'Batería', db: -3, pans: [0] },
+  bass:   { label: 'Bajo / 808', db: -4, pans: [0] },
+  other:  { label: 'Otro', db: -5, pans: [-0.25, 0.25] },
+  skip:   { label: 'No tocar' },
+};
+function guessRole(t, firstVocal) {
+  if (t.mixRole && ROLES[t.mixRole]) return t.mixRole;
+  const type = t.type === 'OTHER' ? guessType(t.name) : t.type;
+  if (type === 'VOCAL') return firstVocal ? 'lead' : 'vocal2';
+  return { CHOIR: 'choir', INSTRUMENTAL: 'inst', DRUMS: 'drums', BASS: 'bass' }[type] || 'other';
+}
+function autoMixSheet() {
+  const p = S.project;
+  const tracks = p.tracks.filter((t) => t.regions.length);
+  if (tracks.length < 2) return toast('Necesitas al menos 2 pistas con audio');
+  let seenVocal = false;
+  const roles = new Map();
+  tracks.forEach((t) => { const r = guessRole(t, !seenVocal && !p.tracks.some((x) => x.mixRole === 'lead' && x !== t)); if (r === 'lead') seenVocal = true; roles.set(t.id, r); });
+  openSheet((el) => {
+    el.innerHTML = sheetHead(`${icon('ic-sparkle')} Mezcla automática`) + `<div class="sheet-body">
+      <p class="sub" style="margin:0 0 12px;line-height:1.5">Como en un concierto: la voz principal al frente y en medio, los coros más bajitos y a los lados, el beat atrás. Dime qué es cada pista y Arcadia acomoda el volumen y el paneo.</p>
+      ${tracks.map((t) => `<div class="am-row">
+        <span class="am-dot" style="background:${t.color}"></span>
+        <div class="am-name"><b>${esc(t.name)}</b><span class="sub" data-am="${t.id}"></span></div>
+        <select class="text-input am-sel" data-role="${t.id}">${Object.entries(ROLES).map(([k, v]) => `<option value="${k}" ${roles.get(t.id) === k ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
+      </div>`).join('')}
+    </div>
+    <div class="sheet-foot"><button class="btn primary" style="width:100%" data-a="go">${icon('ic-sparkle', 'sm')}Mezclar</button></div>`;
+    el.querySelectorAll('[data-role]').forEach((sel) => sel.addEventListener('change', () => roles.set(sel.dataset.role, sel.value)));
+    el.onclick = (e) => {
+      if (e.target.closest('[data-x]')) return closeSheet();
+      if (e.target.closest('[data-a="go"]')) runAutoMix(el, tracks, roles);
+    };
+  });
+}
+async function runAutoMix(el, tracks, roles) {
+  const use = tracks.filter((t) => roles.get(t.id) !== 'skip');
+  if (use.length < 2) return toast('Elige al menos 2 pistas para mezclar');
+  if (engine.playing) stopPlayback();
+  const done = busy('Escuchando y acomodando tus pistas…');
+  const loud = new Map();
+  try { for (const t of use) loud.set(t.id, await engine.trackLoudness(t)); }
+  catch (err) { console.error(err); done(); return toast('No se pudo analizar el audio'); }
+  done();
+  const valid = use.filter((t) => Number.isFinite(loud.get(t.id)));
+  const lead = valid.find((t) => roles.get(t.id) === 'lead');
+  // Referencia: la voz principal se queda donde está; si no hay, el promedio.
+  const ref = lead ? loud.get(lead.id) : valid.reduce((a, t) => a + loud.get(t.id) - ROLES[roles.get(t.id)].db, 0) / Math.max(1, valid.length);
+  const panCount = {};
+  const plan = valid.map((t) => {
+    const role = ROLES[roles.get(t.id)];
+    const change = clamp(ref + role.db - loud.get(t.id), -20, 20);
+    const n = panCount[roles.get(t.id)] = (panCount[roles.get(t.id)] ?? -1) + 1;
+    return { t, role: roles.get(t.id), change, pan: role.pans[n % role.pans.length] };
+  });
+  commit(() => {
+    tracks.forEach((t) => { t.mixRole = roles.get(t.id); });
+    plan.forEach(({ t, change, pan }) => {
+      const f = Math.pow(10, change / 20);
+      t.regions.forEach((r) => { r.gain = clamp((r.gain ?? 1) * f, 0.05, 10); });
+      t.volume = 0.85;
+      t.pan = pan;
+    });
+  }, { restart: true });
+  plan.forEach(({ t, change, pan }) => {
+    const span = el.querySelector(`[data-am="${t.id}"]`);
+    if (span) span.innerHTML = `<b style="color:${Math.abs(change) < 0.5 ? 'var(--text-2)' : change > 0 ? 'var(--sync)' : 'var(--mute)'}">${change >= 0 ? '+' : ''}${change.toFixed(1)} dB</b> · ${fmtPan(pan)}`;
+  });
+  if (S.mixerOpen) renderMixer();
+  toast(`¡Listo! ${plan.length} pistas acomodadas 🎛️ (puedes deshacer)`);
+}
+
+// ---------- Masterizar (la pulida final de toda la canción) ----------
+function paintMasterBtn() { $('#tb-master').classList.toggle('on', !!(S.project && S.project.mastering && S.project.mastering.enabled)); }
+function masterSheet() {
+  const p = S.project;
+  if (!p.mastering) p.mastering = defaultMastering();
+  openSheet((el) => {
+    const m = p.mastering;
+    el.innerHTML = sheetHead(`${icon('ic-sparkle')} Masterizar`) + `<div class="sheet-body">
+      <p class="sub" style="margin:0 0 6px;line-height:1.5">La pulida final: tu canción suena más fuerte, clara y pareja, como las de Spotify. Se aplica a toda la canción y también al exportar.</p>
+      <button class="sheet-item" data-a="toggle"><b style="flex:1">Masterización</b><span class="switch ${m.enabled ? 'on' : ''}"></span></button>
+      <div class="sub" style="margin:8px 0 8px">Estilo</div>
+      <div class="mp-list">${Object.entries(MASTER_PRESETS).map(([k, v]) => `
+        <button class="mp-opt ${m.preset === k ? 'on' : ''}" data-mp="${k}"><b>${v.label}</b><span>${v.desc}</span></button>`).join('')}
+      </div>
+      ${rangeField('Intensidad', 'mint', 0, 100, 1, m.intensity, m.intensity + ' %')}
+      <div class="sub" style="margin:16px 0 0">Ajuste final de tono (opcional)</div>
+      ${rangeField('Graves · bajo y bombo', 'mlow', -6, 6, 0.5, m.low, (m.low > 0 ? '+' : '') + m.low + ' dB')}
+      ${rangeField('Medios · la voz', 'mmid', -6, 6, 0.5, m.mid, (m.mid > 0 ? '+' : '') + m.mid + ' dB')}
+      ${rangeField('Agudos · el brillo', 'mhigh', -6, 6, 0.5, m.high, (m.high > 0 ? '+' : '') + m.high + ' dB')}
+      <p class="sub" style="margin:10px 0 0;line-height:1.5">💡 Para comparar, dale play y prende y apaga el interruptor de arriba: escuchas el antes y el después.</p>
+    </div>`;
+    const db = (v) => (v > 0 ? '+' : '') + v + ' dB';
+    const live = (fn) => (v) => { const out = fn(v); engine.setMastering(m); return out; };
+    bindRanges(el, {
+      mint: live((v) => { m.intensity = v; if (!m.enabled) { m.enabled = true; refreshMasterSwitch(el, m); } return v + ' %'; }),
+      mlow: live((v) => { m.low = v; return db(v); }),
+      mmid: live((v) => { m.mid = v; return db(v); }),
+      mhigh: live((v) => { m.high = v; return db(v); }),
+    });
+    el.onclick = (e) => {
+      if (e.target.closest('[data-x]')) return closeSheet();
+      const opt = e.target.closest('[data-mp]');
+      if (opt) {
+        commit(() => { m.preset = opt.dataset.mp; m.enabled = true; }, { restart: false });
+        engine.setMastering(m); paintMasterBtn(); return refreshSheet();
+      }
+      if (e.target.closest('[data-a="toggle"]')) {
+        commit(() => { m.enabled = !m.enabled; }, { restart: false });
+        engine.setMastering(m); paintMasterBtn(); refreshSheet();
+        toast(m.enabled ? `Master: ${MASTER_PRESETS[m.preset].label} ✨` : 'Master apagado (sonido original)');
+      }
+    };
+  });
+}
+function refreshMasterSwitch(el, m) { el.querySelector('[data-a="toggle"] .switch')?.classList.toggle('on', m.enabled); paintMasterBtn(); }
+$('#tb-master').addEventListener('click', masterSheet);
+
 // ---------- Menú del proyecto ----------
 function projectSheet() {
   openSheet((el) => {
@@ -1250,6 +1404,8 @@ function projectSheet() {
       <button class="sheet-item" data-a="snap">${icon('ic-tune')}Ajustar a la cuadrícula<span class="switch ${S.settings.snap ? 'on' : ''}" style="margin-left:auto"></span></button>
       ${rangeField('Compensar retraso al grabar', 'lat', 0, 400, 5, S.settings.latencyMs, S.settings.latencyMs + ' ms')}
       <div class="sub" style="margin:-4px 0 10px">Si tu voz grabada queda atrasada respecto a la pista, súbelo poco a poco.</div>
+      <button class="sheet-item" data-a="master">${icon('ic-sparkle')}Masterizar (pulida final)<span class="hint">${p.mastering && p.mastering.enabled ? 'Encendido' : 'Apagado'}</span></button>
+      <button class="sheet-item" data-a="automix">${icon('ic-sparkle')}Mezcla automática</button>
       <button class="sheet-item" data-a="level">${icon('ic-sparkle')}Nivelar volumen de las pistas</button>
       <button class="sheet-item" data-a="export">${icon('ic-download')}Exportar canción (WAV)</button>
       <button class="sheet-item" data-a="sync">${icon('ic-cloud-up')}Sincronizar con Abraham IA Music<span class="hint">Pronto</span></button>
@@ -1272,6 +1428,8 @@ function projectSheet() {
       if (a === 'snap') { S.settings.snap = !S.settings.snap; saveSettings(); refreshSheet(); }
       if (a === 'export') { closeSheet(); exportSong(); }
       if (a === 'level') levelSheet();
+      if (a === 'master') masterSheet();
+      if (a === 'automix') autoMixSheet();
       if (a === 'sync') toast(SOON.sync);
     };
   });
@@ -1364,6 +1522,7 @@ async function toggleRecord() {
   }
   try {
     if (engine.playing) stopPlayback();
+    await engine.ready();
     await engine.loadProject(S.project);
     await engine.startRecording();
   } catch (err) {

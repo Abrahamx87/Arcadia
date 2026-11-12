@@ -2,6 +2,7 @@
 // Pistas -> efectos -> volumen -> paneo -> master -> limitador -> bocinas.
 
 import { EFFECTS, makeImpulse } from './effects.js';
+import { buildMastering, setMastering } from './master.js';
 import { loadAudio } from './store.js';
 
 const dbToGain = (db) => Math.pow(10, db / 20);
@@ -32,6 +33,11 @@ export class Engine {
       // El retraso extra se compensa solo al grabar (ver recordLatency).
       this.ctx = new AC({ latencyHint: 'playback' });
       this.ms = this.buildMaster(this.ctx);
+      this.workletPromise = loadWorklet(this.ctx).then((ok) => {
+        // Las pistas que ya tenían Shimmer se vuelven a armar, ahora con el cambio de tono.
+        if (ok) this.chains.forEach((c) => { c.sig = ''; });
+        return ok;
+      });
       this.master = this.ms.master;
       this.masterIn = this.ms.input;
     }
@@ -54,8 +60,10 @@ export class Engine {
     clip.curve = softClipCurve();
     clip.oversample = 'none';                  // sin rebote del filtro: el techo de 0.97 se respeta exacto
     const half = ctx.createGain(); half.gain.value = 0.5;   // la curva cubre ±2 → entra a la mitad
-    input.connect(master).connect(comp).connect(half).connect(clip).connect(ctx.destination);
-    return { ctx, input, master, reverbs: new Map() };
+    input.connect(master);
+    const mastering = buildMastering(ctx, master, comp);   // la pulida final va antes del limitador
+    comp.connect(half).connect(clip).connect(ctx.destination);
+    return { ctx, input, master, mastering, reverbs: new Map() };
   }
 
   /** Reverb compartida por tipo: una sola para todas las pistas (mucho más ligera que una por pista). */
@@ -78,6 +86,12 @@ export class Engine {
   }
 
   setMasterVolume(v) { if (this.master) this.master.gain.value = v; }
+
+  /** Espera a que el procesador del eco angelical esté listo (solo la primera vez). */
+  async ready() { this.ensure(); try { await this.workletPromise; } catch (e) {} }
+
+  /** Cambia la masterización en vivo (mientras suena se escucha el cambio). */
+  setMastering(cfg) { if (this.ms) setMastering(this.ms.mastering, cfg, this.ctx); }
 
   // ---------- Carga de audio ----------
   async getBuffer(audioId) {
@@ -371,7 +385,10 @@ export class Engine {
     const rate = 44100;
     const length = Math.ceil((end + 1.5) * rate);
     const ctx = new OfflineAudioContext(2, length, rate);
+    await loadWorklet(ctx);
     const ms = this.buildMaster(ctx);
+    ms.master.gain.value = project.masterVolume ?? 1;
+    setMastering(ms.mastering, project.mastering, ctx);
     const anySolo = project.tracks.some((t) => t.solo);
     project.tracks.forEach((t) => {
       const chain = this.buildChain(ms, t);
@@ -400,6 +417,13 @@ export function projectEnd(project) {
 
 function effectSignature(track) {
   return (track.effects || []).filter((e) => e.enabled).map((e) => e.id + e.type).join('|');
+}
+
+const WORKLET_URL = new URL('./pitch-worklet.js', import.meta.url);
+async function loadWorklet(ctx) {
+  if (!ctx.audioWorklet) return false;
+  try { await ctx.audioWorklet.addModule(WORKLET_URL); ctx._pitchReady = true; return true; }
+  catch (e) { console.warn('Shimmer sin cambio de tono:', e); return false; }
 }
 
 function softClipCurve() {

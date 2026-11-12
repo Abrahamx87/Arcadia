@@ -11,6 +11,7 @@ export const REVERB_TYPES = {
   cathedral: { label: 'Catedral',         seconds: 3.6, decay: 1.8, bright: 0.35, pre: 0.030 },
   plate:     { label: 'Plate (placa)',    seconds: 1.9, decay: 2.4, bright: 0.85, pre: 0.000 },
   spring:    { label: 'Resorte vintage',  seconds: 1.5, decay: 2.8, bright: 0.65, pre: 0.000, spring: true },
+  shimmer:   { label: 'Shimmer', seconds: 4.2, decay: 1.7, bright: 0.8, pre: 0.02, hidden: true },
 };
 
 const impulseCache = new Map();
@@ -139,6 +140,37 @@ function delay(ctx) {
   return { input, output, set(p) { d.delayTime.value = p.time / 1000; fb.gain.value = p.feedback / 100; wet.gain.value = p.mix / 100; } };
 }
 
+// ---------- Shimmer: eco angelical ----------
+// Reverb larga y brillante cuya cola se sube una octava (pitch shifter) y vuelve a entrar a la reverb.
+function shimmer(ctx) {
+  const input = ctx.createGain(), output = ctx.createGain();
+  const dry = ctx.createGain(), wet = ctx.createGain(), sum = ctx.createGain();
+  const pre = ctx.createBiquadFilter(); pre.type = 'highpass'; pre.frequency.value = 300;
+  const conv = ctx.createConvolver(); conv.buffer = makeImpulse(ctx, 'shimmer');
+  const fb = ctx.createGain(), fbDelay = ctx.createDelay(1); fbDelay.delayTime.value = 0.05;
+  const fbTone = ctx.createBiquadFilter(); fbTone.type = 'lowpass'; fbTone.frequency.value = 7000;
+  const sparkle = ctx.createGain();
+  input.connect(dry).connect(output);
+  input.connect(pre).connect(sum).connect(conv).connect(wet).connect(output);
+  let shifter = null;
+  if (ctx._pitchReady) {
+    shifter = new AudioWorkletNode(ctx, 'pitch-shift', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    conv.connect(shifter);                                     // la cola de la reverb…
+    shifter.connect(fbTone).connect(fb).connect(fbDelay).connect(sum);   // …una octava arriba vuelve a entrar
+    pre.connect(sparkle).connect(fbDelay);                     // un poquito de la voz una octava arriba
+  }
+  return {
+    input, output,
+    set(p) {
+      const mix = p.mix / 100, amt = p.amount / 100;
+      dry.gain.value = 1 - mix * 0.4;
+      wet.gain.value = mix * 1.3;
+      fb.gain.value = amt * 0.55;          // < 0.6: brillante pero estable
+      sparkle.gain.value = amt * 0.25;
+    },
+  };
+}
+
 // ---------- Filtro limpiador (quita graves sucios) ----------
 function cleanup(ctx) {
   const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.Q.value = 0.7;
@@ -150,7 +182,7 @@ export const EFFECTS = {
     label: 'Univerb', sub: 'Reverb', build: reverb,
     params: [
       { key: 'mix', label: 'Mix', min: 0, max: 100, step: 1, unit: '%', def: 35 },
-      { key: 'type', label: 'Type', options: Object.fromEntries(Object.entries(REVERB_TYPES).map(([k, v]) => [k, v.label])), def: 'institute' },
+      { key: 'type', label: 'Type', options: Object.fromEntries(Object.entries(REVERB_TYPES).filter(([, v]) => !v.hidden).map(([k, v]) => [k, v.label])), def: 'institute' },
     ],
   },
   exciter: {
@@ -196,6 +228,13 @@ export const EFFECTS = {
       { key: 'mix', label: 'Mix', min: 0, max: 100, step: 1, unit: '%', def: 25 },
     ],
   },
+  shimmer: {
+    label: 'Shimmer', sub: 'Eco angelical', build: shimmer,
+    params: [
+      { key: 'mix', label: 'Mix', min: 0, max: 100, step: 1, unit: '%', def: 35 },
+      { key: 'amount', label: 'Brillo angelical', min: 0, max: 100, step: 1, unit: '%', def: 60 },
+    ],
+  },
   cleanup: {
     label: 'Limpiador', sub: 'Quita graves sucios', build: cleanup,
     params: [{ key: 'freq', label: 'Corte', min: 20, max: 400, step: 5, unit: 'Hz', def: 90 }],
@@ -225,4 +264,10 @@ export const PRESETS = [
     { type: 'reverb', params: { mix: 20, type: 'plate' } },
   ] },
   { name: 'Sala grande', effects: [{ type: 'reverb', params: { mix: 45, type: 'hall' } }] },
+  { name: 'Voz angelical', effects: [
+    { type: 'cleanup', params: { freq: 100 } },
+    { type: 'compressor', params: { threshold: -20, ratio: 3, attack: 10, release: 200, makeup: 4 } },
+    { type: 'exciter', params: { tune: 6000, harmonics: 10, threshold: 0, mix: -12 } },
+    { type: 'shimmer', params: { mix: 40, amount: 65 } },
+  ] },
 ];

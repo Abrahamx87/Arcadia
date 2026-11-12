@@ -18,6 +18,14 @@ Estudio musical multipista estilo BandLab, hecho por Abraham. Es una web que fun
 - **Exportar** la canción a WAV (descargar o compartir)
 - Todo se guarda en el celular (IndexedDB), también sin internet
 
+## Versión 0.14
+- **Masterizar** (botón *Master*): 5 estilos (Universal, Urbano, Brillante, Cálido, Suave), intensidad y ajuste final de graves/medios/agudos
+- **Mezcla automática**: cada pista tiene un papel (voz principal, segunda voz, coros, beat…) y Arcadia acomoda volumen y paneo
+- **Nivelar volumen** (LUFS) para igualar voces de distintos artistas
+- **Shimmer / eco angelical**: reverb con cola una octava arriba (AudioWorklet) y preset *Voz angelical*
+- **Pídelo con palabras**: escribe "voz trap con mucho eco" y se arma la cadena de efectos
+- Audio sin tronidos: reverb compartida, limitador suave con techo de 0.97
+
 ## Estructura
 ```
 index.html         Pantallas e íconos
@@ -26,6 +34,9 @@ js/app.js          Interfaz: biblioteca, estudio, hojas
 js/engine.js       Motor de audio: reproducir, grabar, exportar, demo
 js/effects.js      Efectos y presets
 js/store.js        Guardado local (IndexedDB)
+js/master.js       Masterización
+js/wordfx.js       Efectos a partir de palabras
+js/pitch-worklet.js Cambiador de tono para el Shimmer
 sw.js              Funciona sin internet
 ```
 

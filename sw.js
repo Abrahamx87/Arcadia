@@ -1,8 +1,8 @@
 // Service worker de Arcadia: guarda la app para que abra rápido y funcione sin internet.
 // Siempre pregunta primero al servidor si hay una versión nueva (sin usar copias viejas).
-const CACHE = 'arcadia-v13';
+const CACHE = 'arcadia-v14';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './css/app.css',
-  './js/app.js', './js/engine.js', './js/effects.js', './js/store.js'];
+  './js/app.js', './js/engine.js', './js/effects.js', './js/store.js', './js/master.js', './js/pitch-worklet.js', './js/wordfx.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))));
