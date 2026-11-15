@@ -31,7 +31,8 @@ export class Engine {
       const AC = window.AudioContext || window.webkitAudioContext;
       // 'playback': el cel usa un búfer de audio más grande → no se traba ni truena con muchas pistas.
       // El retraso extra se compensa solo al grabar (ver recordLatency).
-      this.ctx = new AC({ latencyHint: 'playback' });
+      // 'balanced': mucho menos retraso entre la línea y lo que suena que 'playback', sin tronidos.
+      this.ctx = new AC({ latencyHint: 'balanced' });
       this.ms = this.buildMaster(this.ctx);
       this.workletPromise = loadWorklet(this.ctx).then((ok) => {
         // Las pistas que ya tenían Shimmer se vuelven a armar, ahora con el cambio de tono.
@@ -231,15 +232,17 @@ export class Engine {
     }
     ctxTime -= (this.syncMs || 0) / 1000;
     const audio = this.startPos + (ctxTime - this.startCtxTime);
-    // Reloj liso, como BandLab: la línea arranca a avanzar en cuanto das play (sin quedarse
-    // pegada), y se va emparejando suavecito con lo que suena, cambiando su velocidad como
-    // máximo un 20 %. Así nunca da brincos aunque pauses y despauses rapidísimo.
-    const c = this._clk || (this._clk = { p: this.startPos, t: now });
+    // En vivo: la línea no avanza hasta que de verdad empieza a sonar (son milisegundos),
+    // así lo que está bajo la línea es exactamente lo que escuchas.
+    if (audio <= this.startPos) { this._clk = null; return this.startPos; }
+    // Reloj liso: avanza con la pantalla y se empareja con el sonido cambiando su velocidad
+    // como máximo un 20 %, así nunca da brincos.
+    const c = this._clk || (this._clk = { p: audio, t: now });
     const dt = Math.min(0.1, Math.max(0, (now - c.t) / 1000));
     c.t = now;
     const err = audio - (c.p + dt);
-    if (Math.abs(err) > 0.4) c.p = Math.max(this.startPos, audio);
-    else c.p += dt + Math.max(-0.2 * dt, Math.min(0.2 * dt, err * 0.1));
+    if (Math.abs(err) > 0.15) c.p = audio;
+    else c.p += dt + Math.max(-0.2 * dt, Math.min(0.2 * dt, err * 0.15));
     if (c.p < this._lastVis) c.p = this._lastVis; // nunca hacia atrás
     this._lastVis = c.p;
     return c.p;

@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.18';
+const VERSION = '0.19';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -401,7 +401,7 @@ function gridBg(p, scale) {
 }
 
 // ---------- Formas de onda (nítidas a la resolución real de la pantalla) ----------
-const TILE = 1024;           // ancho de cada pedazo en píxeles de pantalla
+const TILE = 384;            // ancho de cada pedazo en píxeles de pantalla (chiquitos = se dibujan rapidísimo)
 const DPR = () => Math.min(window.devicePixelRatio || 1, 4);
 const regionPeak = new Map();
 let tileObserver = null;
@@ -418,18 +418,41 @@ function peakOf(r) {
   return m;
 }
 
+// Cola de dibujo: las ondas se dibujan poco a poco, unos milisegundos por cuadro, empezando por
+// lo que está bajo la línea blanca. Así la pantalla nunca se congela (60–120 cuadros por segundo).
+let tileQueue = [], tilePump = 0, tileViewX = 0;
+function queueTile(cv) {
+  if (cv._queued) return;
+  cv._queued = true;
+  tileQueue.push(cv);
+  if (!tilePump) tilePump = requestAnimationFrame(pumpTiles);
+}
+function pumpTiles() {
+  tilePump = 0;
+  const t0 = performance.now();
+  tileQueue.sort((a, b) => Math.abs(a._gx - tileViewX) - Math.abs(b._gx - tileViewX));
+  while (tileQueue.length && performance.now() - t0 < 5) {
+    const cv = tileQueue.shift();
+    if (cv.isConnected) drawTile(cv);
+  }
+  if (tileQueue.length) tilePump = requestAnimationFrame(pumpTiles);
+}
+
 function setupWaveTiles(p, scale) {
   if (tileObserver) tileObserver.disconnect();
+  tileQueue = [];
   tileObserver = new IntersectionObserver((entries) => {
     entries.forEach((en) => {
       if (!en.isIntersecting) return;
       tileObserver.unobserve(en.target);
-      drawTile(en.target);
+      queueTile(en.target);
     });
-  }, { root: $('#timeline'), rootMargin: '0px 1200px 0px 1200px' });
-  // Lo que está a la vista se dibuja al momento (sin parpadeo en blanco al hacer zoom o reproducir).
+  }, { root: $('#timeline'), rootMargin: '0px 900px 0px 900px' });
+  // Lo que se ve en pantalla se dibuja al momento (sin parpadeo); lo demás, en la cola.
   const viewX = (engine.playing ? engine.visualPosition() : engine.position) * scale;
-  const near = [];
+  tileViewX = viewX;
+  const half = ($('#timeline').clientWidth || 800) / 2 + 40;
+  const now = [];
   p.tracks.forEach((t) => t.regions.forEach((r) => {
     const el = document.querySelector(`[data-region="${r.id}"]`);
     if (!el || !engine.peaks.has(r.audioId)) return;
@@ -439,13 +462,13 @@ function setupWaveTiles(p, scale) {
       cv.width = 1; cv.height = 1;
       cv.style.cssText = `left:${x0}px;width:${Math.min(TILE, w - x0)}px`;
       cv._wave = { r, color: t.color, x0, tw: Math.min(TILE, w - x0), w };
+      cv._gx = r.start * scale + x0;
       el.appendChild(cv);
-      const gx = r.start * scale + x0;
-      if (gx + TILE > viewX - 1400 && gx < viewX + 1400) near.push(cv);
+      if (cv._gx + TILE > viewX - half && cv._gx < viewX + half) now.push(cv);
       else tileObserver.observe(cv);
     }
   }));
-  near.forEach(drawTile);
+  now.forEach(drawTile);
 }
 
 /** Onda rellena y simétrica, como en BandLab: color brillante sobre el mismo color oscuro. */
@@ -1460,7 +1483,7 @@ function projectSheet() {
       ${rangeField('Compensar retraso al grabar', 'lat', 0, 400, 5, S.settings.latencyMs, S.settings.latencyMs + ' ms')}
       <div class="sub" style="margin:-4px 0 10px">Si tu voz grabada queda atrasada respecto a la pista, súbelo poco a poco.</div>
       ${rangeField('Sincronía: línea blanca y sonido', 'sync', -300, 500, 10, S.settings.syncMs || 0, syncLabel(S.settings.syncMs || 0))}
-      <div class="sub" style="margin:-4px 0 10px">Dale play y muévelo: si la línea pasa por la onda <b>antes</b> de que se escuche, súbelo (con audífonos Bluetooth casi siempre hace falta). Si se escucha antes, bájalo.</div>
+      <div class="sub" style="margin:-4px 0 10px">Dale play y muévelo: si la línea pasa por la onda <b>antes</b> de que se escuche, súbelo (con audífonos Bluetooth casi siempre hace falta). Si se escucha antes, bájalo.${engine.ctx ? ` Tu celular dice que tarda <b>${Math.round(((engine.ctx.baseLatency || 0) + (engine.ctx.outputLatency || 0)) * 1000)} ms</b> en sonar (ya está compensado).` : ''}</div>
       <button class="sheet-item" data-a="master">${icon('ic-sparkle')}Masterizar (pulida final)<span class="hint">${p.mastering && p.mastering.enabled ? 'Encendido' : 'Apagado'}</span></button>
       <button class="sheet-item" data-a="automix">${icon('ic-sparkle')}Mezcla automática</button>
       <button class="sheet-item" data-a="level">${icon('ic-sparkle')}Nivelar volumen de las pistas</button>
