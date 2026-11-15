@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.17';
+const VERSION = '0.18';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -584,7 +584,9 @@ function settleScroll(pos = engine.position) {
   requestAnimationFrame(check);
 }
 /** Frena en seco cualquier deslizón que el celular siga moviendo por inercia. */
+let lastScrollAt = 0;
 function stopFling() {
+  if (performance.now() - lastScrollAt > 600) return; // nada se está deslizando: no hace falta
   const tl = $('#timeline');
   const x = tl.scrollLeft;
   tl.style.overflowX = 'hidden';
@@ -754,6 +756,7 @@ let pinch = null;
   }, { passive: true });
   tl.addEventListener('mousemove', () => { if (touching) { userMoved = true; scrollTarget = null; } }, { passive: true });
   tl.addEventListener('scroll', () => {
+    lastScrollAt = performance.now();
     if (!S.project || S.recording || engine.playing || pinch) return;
     // Justo después de pausar, los avisos de scroll "viejos" no pueden mover la canción.
     if (scrollTarget !== null && !userMoved && performance.now() < scrollGuardUntil) {

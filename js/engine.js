@@ -231,28 +231,28 @@ export class Engine {
     }
     ctxTime -= (this.syncMs || 0) / 1000;
     const audio = this.startPos + (ctxTime - this.startCtxTime);
-    if (audio <= this.startPos) return this.startPos;
-    // Reloj liso: avanza con el reloj de la pantalla (parejito, sin saltos) y se va
-    // corrigiendo poquito a poco contra el reloj del audio, que en Android avanza "a brincos".
-    const c = this._clk;
-    if (!c) { this._clk = { base: audio, t: now }; this._lastVis = audio; return audio; }
-    let p = c.base + (now - c.t) / 1000;
-    const err = audio - p;
-    if (Math.abs(err) > 0.25) { c.base = audio; c.t = now; p = audio; }
-    else { c.base += err * 0.03; p += err * 0.03; }
-    if (p < this._lastVis) p = this._lastVis; // nunca hacia atrás
-    this._lastVis = p;
-    return p;
+    // Reloj liso, como BandLab: la línea arranca a avanzar en cuanto das play (sin quedarse
+    // pegada), y se va emparejando suavecito con lo que suena, cambiando su velocidad como
+    // máximo un 20 %. Así nunca da brincos aunque pauses y despauses rapidísimo.
+    const c = this._clk || (this._clk = { p: this.startPos, t: now });
+    const dt = Math.min(0.1, Math.max(0, (now - c.t) / 1000));
+    c.t = now;
+    const err = audio - (c.p + dt);
+    if (Math.abs(err) > 0.4) c.p = Math.max(this.startPos, audio);
+    else c.p += dt + Math.max(-0.2 * dt, Math.min(0.2 * dt, err * 0.1));
+    if (c.p < this._lastVis) c.p = this._lastVis; // nunca hacia atrás
+    this._lastVis = c.p;
+    return c.p;
   }
 
   play(project, from) {
-    this._lastVis = undefined;
+    this._lastVis = from;
     this._clk = null;
     const ctx = this.ensure();
     this.stopSources();
     this.syncMix(project);
     this.bpm = project.bpm;
-    const t0 = ctx.currentTime + 0.06;
+    const t0 = ctx.currentTime + 0.03;
     this.startCtxTime = t0;
     this.startPos = from;
     this.playing = true;
