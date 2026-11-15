@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.16';
+const VERSION = '0.17';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -56,6 +56,7 @@ const S = {
   settings: loadSettings(),
 };
 engine.metronome = S.settings.metronome;
+engine.syncMs = S.settings.syncMs || 0;
 const pps = () => S.pps;
 const headerW = () => 60;
 /** Espacio a cada lado para que el inicio y el final de la canción puedan quedar bajo la línea blanca del centro. */
@@ -426,6 +427,9 @@ function setupWaveTiles(p, scale) {
       drawTile(en.target);
     });
   }, { root: $('#timeline'), rootMargin: '0px 1200px 0px 1200px' });
+  // Lo que está a la vista se dibuja al momento (sin parpadeo en blanco al hacer zoom o reproducir).
+  const viewX = (engine.playing ? engine.visualPosition() : engine.position) * scale;
+  const near = [];
   p.tracks.forEach((t) => t.regions.forEach((r) => {
     const el = document.querySelector(`[data-region="${r.id}"]`);
     if (!el || !engine.peaks.has(r.audioId)) return;
@@ -436,9 +440,12 @@ function setupWaveTiles(p, scale) {
       cv.style.cssText = `left:${x0}px;width:${Math.min(TILE, w - x0)}px`;
       cv._wave = { r, color: t.color, x0, tw: Math.min(TILE, w - x0), w };
       el.appendChild(cv);
-      tileObserver.observe(cv);
+      const gx = r.start * scale + x0;
+      if (gx + TILE > viewX - 1400 && gx < viewX + 1400) near.push(cv);
+      else tileObserver.observe(cv);
     }
   }));
+  near.forEach(drawTile);
 }
 
 /** Onda rellena y simétrica, como en BandLab: color brillante sobre el mismo color oscuro. */
@@ -1438,6 +1445,7 @@ function refreshMasterSwitch(el, m) { el.querySelector('[data-a="toggle"] .switc
 $('#tb-master').addEventListener('click', masterSheet);
 
 // ---------- Menú del proyecto ----------
+function syncLabel(v) { return v === 0 ? 'Automático' : (v > 0 ? `línea ${v} ms más lenta` : `línea ${-v} ms más rápida`); }
 function projectSheet() {
   openSheet((el) => {
     const p = S.project;
@@ -1448,6 +1456,8 @@ function projectSheet() {
       <button class="sheet-item" data-a="snap">${icon('ic-tune')}Ajustar a la cuadrícula<span class="switch ${S.settings.snap ? 'on' : ''}" style="margin-left:auto"></span></button>
       ${rangeField('Compensar retraso al grabar', 'lat', 0, 400, 5, S.settings.latencyMs, S.settings.latencyMs + ' ms')}
       <div class="sub" style="margin:-4px 0 10px">Si tu voz grabada queda atrasada respecto a la pista, súbelo poco a poco.</div>
+      ${rangeField('Sincronía: línea blanca y sonido', 'sync', -300, 500, 10, S.settings.syncMs || 0, syncLabel(S.settings.syncMs || 0))}
+      <div class="sub" style="margin:-4px 0 10px">Dale play y muévelo: si la línea pasa por la onda <b>antes</b> de que se escuche, súbelo (con audífonos Bluetooth casi siempre hace falta). Si se escucha antes, bájalo.</div>
       <button class="sheet-item" data-a="master">${icon('ic-sparkle')}Masterizar (pulida final)<span class="hint">${p.mastering && p.mastering.enabled ? 'Encendido' : 'Apagado'}</span></button>
       <button class="sheet-item" data-a="automix">${icon('ic-sparkle')}Mezcla automática</button>
       <button class="sheet-item" data-a="level">${icon('ic-sparkle')}Nivelar volumen de las pistas</button>
@@ -1455,6 +1465,8 @@ function projectSheet() {
       <button class="sheet-item" data-a="sync">${icon('ic-cloud-up')}Sincronizar con Abraham IA Music<span class="hint">Pronto</span></button>
       <div class="sub" style="text-align:center;padding:14px 0 4px">Arcadia v${VERSION}</div>
     </div>`;
+    const sy = el.querySelector('[data-range="sync"]');
+    sy.addEventListener('input', () => { S.settings.syncMs = engine.syncMs = +sy.value; el.querySelector('[data-show="sync"]').textContent = syncLabel(+sy.value); saveSettings(); });
     const lat = el.querySelector('[data-range="lat"]');
     lat.addEventListener('input', () => { S.settings.latencyMs = +lat.value; el.querySelector('[data-show="lat"]').textContent = lat.value + ' ms'; saveSettings(); });
     el.onclick = async (e) => {

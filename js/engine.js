@@ -221,12 +221,15 @@ export class Engine {
     if (!this.playing || !this.ctx) return this.startPos;
     const now = performance.now();
     const ts = this.ctx.getOutputTimestamp ? this.ctx.getOutputTimestamp() : null;
-    let ctxTime;
+    // Lo que de verdad está saliendo por la bocina (o audífonos) va atrasado respecto a lo que la
+    // app ya mandó a sonar. Se usan dos medidas del celular y se toma la más atrasada, para que la
+    // línea nunca vaya adelante del sonido. Más el ajuste manual del usuario (Bluetooth, etc.).
+    const lat = (this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0);
+    let ctxTime = this.ctx.currentTime - lat;
     if (ts && ts.performanceTime > 0 && ts.contextTime > 0) {
-      ctxTime = ts.contextTime + (now - ts.performanceTime) / 1000;
-    } else {
-      ctxTime = this.ctx.currentTime;
+      ctxTime = Math.min(ctxTime, ts.contextTime + (now - ts.performanceTime) / 1000);
     }
+    ctxTime -= (this.syncMs || 0) / 1000;
     const audio = this.startPos + (ctxTime - this.startCtxTime);
     if (audio <= this.startPos) return this.startPos;
     // Reloj liso: avanza con el reloj de la pantalla (parejito, sin saltos) y se va
@@ -284,7 +287,8 @@ export class Engine {
   }
 
   stop() {
-    const pos = this.position;
+    // Se pausa justo en lo último que se escuchó (no en lo que apenas iba a salir por la bocina).
+    const pos = this.visualPosition();
     this.stopSources();
     this.playing = false;
     this.startPos = pos;
