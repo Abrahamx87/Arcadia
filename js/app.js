@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.19';
+const VERSION = '0.20';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -358,7 +358,7 @@ function renderStudio() {
       const loading = !engine.buffers.has(r.audioId);
       const sel = S.sel.regionId === r.id;
       return `<div class="region ${sel ? 'selected' : ''} ${loading ? 'loading' : ''}" data-region="${r.id}" data-track="${t.id}"
-        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color, 0.5)};opacity:${dim ? 0.35 : 1}">${sel ? '<i class="r-knob"></i>' : ''}</div>`;
+        style="left:${r.start * scale}px;width:${Math.max(3, r.length * scale)}px;background:${shade(t.color, 0.5)};opacity:${dim ? 0.35 : 1}">${sel ? '<i class="r-knob l" data-trim="l" aria-label="Recortar inicio"></i><i class="r-knob r" data-trim="r" aria-label="Recortar final"></i>' : ''}</div>`;
     }).join('');
     // Como en BandLab: cada pista tiene su fondo del mismo color (oscuro) de lado a lado,
     // y antes del inicio de la canción se ve su nombre con el botón +Fx.
@@ -818,6 +818,7 @@ $('#tracks').addEventListener('click', (e) => {
     else { S.sel = { trackId: id, regionId: null }; renderStudio(); }
     return;
   }
+  if (e.target.closest('[data-trim]') || trim) return;
   const reg = e.target.closest('[data-region]');
   if (reg) { S.sel = { trackId: reg.dataset.track, regionId: reg.dataset.region }; renderStudio(); return; }
   const lane = e.target.closest('[data-lane]');
@@ -831,15 +832,78 @@ $('#ruler').addEventListener('click', (e) => seek((e.clientX - $('#ruler').getBo
 
 // Arrastrar una región seleccionada (como en BandLab: primero tocas, luego mueves).
 let drag = null;
+// ---------- Recortar (estirar o achicar) una región desde sus bolitas, como BandLab ----------
+// El audio se queda quieto en su lugar: solo cambias desde dónde y hasta dónde suena.
+let trim = null;
+function clipCanvases(el, shiftPx, w) {
+  el.querySelectorAll('canvas').forEach((cv) => {
+    const L = cv._wave.x0 - shiftPx, cw = cv._wave.tw;
+    cv.style.left = L + 'px';
+    const cl = Math.max(0, -L), cr = Math.max(0, L + cw - w);
+    cv.style.clipPath = cl || cr ? `inset(0 ${cr}px 0 ${cl}px)` : '';
+  });
+}
+function startTrim(e, knob) {
+  const el = knob.closest('.region');
+  const found = findRegion(el.dataset.region);
+  if (!found) return false;
+  const r = found.region;
+  const dur = engine.buffers.get(r.audioId)?.duration ?? (r.offset + r.length);
+  trim = { el, r, side: knob.dataset.trim, x0: e.clientX, start: r.start, offset: r.offset, length: r.length, dur,
+    moved: false, next: { start: r.start, offset: r.offset, length: r.length } };
+  knob.setPointerCapture(e.pointerId);
+  el.classList.add('trimming');
+  return true;
+}
+function moveTrim(e) {
+  const t = trim, scale = pps();
+  const dx = e.clientX - t.x0;
+  if (!t.moved && Math.abs(dx) < 3) return;
+  t.moved = true;
+  const MIN = 0.05; // lo más chiquita que puede quedar (50 ms)
+  const beat = 60 / S.project.bpm;
+  const snap = (x) => (S.settings.snap ? Math.round(x / beat) * beat : x);
+  if (t.side === 'l') {
+    const end = t.start + t.length;
+    // el inicio no puede ir antes del principio del audio ni antes del 0 de la canción
+    let ns = snap(t.start + dx / scale);
+    ns = Math.max(ns, t.start - t.offset, 0);
+    ns = Math.min(ns, end - MIN);
+    const d = ns - t.start;
+    t.next = { start: ns, offset: t.offset + d, length: t.length - d };
+  } else {
+    let ne = snap(t.start + t.length + dx / scale);
+    ne = Math.min(ne, t.start + (t.dur - t.offset));
+    ne = Math.max(ne, t.start + MIN);
+    t.next = { start: t.start, offset: t.offset, length: ne - t.start };
+  }
+  const w = Math.max(3, t.next.length * scale);
+  t.el.style.left = t.next.start * scale + 'px';
+  t.el.style.width = w + 'px';
+  clipCanvases(t.el, (t.next.offset - t.offset) * scale, w);
+}
+function endTrim() {
+  const t = trim;
+  setTimeout(() => { trim = null; }, 0);
+  t.el.classList.remove('trimming');
+  const n = t.next;
+  if (t.moved && (n.start !== t.start || n.length !== t.length)) commit(() => Object.assign(t.r, n));
+  else renderStudio();
+}
+
 $('#tracks').addEventListener('pointerdown', (e) => {
+  if (S.recording) return;
+  const knob = e.target.closest('[data-trim]');
+  if (knob) { e.stopPropagation(); startTrim(e, knob); return; }
   const el = e.target.closest('.region.selected');
-  if (!el || S.recording) return;
+  if (!el) return;
   const found = findRegion(el.dataset.region);
   if (!found) return;
   drag = { el, region: found.region, x0: e.clientX, start0: found.region.start, moved: false, newStart: found.region.start };
   el.setPointerCapture(e.pointerId);
 });
 $('#tracks').addEventListener('pointermove', (e) => {
+  if (trim) return moveTrim(e);
   if (!drag) return;
   const dx = e.clientX - drag.x0;
   if (!drag.moved && Math.abs(dx) < 5) return;
@@ -851,6 +915,7 @@ $('#tracks').addEventListener('pointermove', (e) => {
   drag.el.style.left = s * pps() + 'px';
 });
 const endDrag = () => {
+  if (trim) return endTrim();
   if (!drag) return;
   const d = drag;
   setTimeout(() => { drag = null; }, 0);
@@ -1122,15 +1187,29 @@ $('#open-mixer').addEventListener('click', () => toggleMixer());
     }
   });
   // Volumen
-  panel.addEventListener('pointerdown', (e) => { if (e.target.matches('.mc-vol')) beginLive(); });
+  // Cuadrito con los decibeles encima de la bolita mientras la mueves (como BandLab)
+  const bubble = (input) => {
+    let b = input.parentElement.querySelector('.db-bubble');
+    if (!b) { b = document.createElement('span'); b.className = 'db-bubble'; input.parentElement.appendChild(b); }
+    const v = parseFloat(input.value), max = parseFloat(input.max) || 1.5;
+    const TH = 24; // tamaño de la bolita
+    const x = input.offsetLeft + TH / 2 + (v / max) * (input.offsetWidth - TH);
+    b.style.left = x + 'px';
+    b.textContent = volToDb(v) + ' dB';
+    b.classList.add('show');
+  };
+  const hideBubble = () => panel.querySelectorAll('.db-bubble.show').forEach((b) => b.classList.remove('show'));
+  panel.addEventListener('pointerdown', (e) => { if (e.target.matches('.mc-vol')) { beginLive(); bubble(e.target); } });
   panel.addEventListener('input', (e) => {
     if (!e.target.matches('.mc-vol')) return;
     beginLive();
     findTrack(e.target.dataset.mvol).volume = parseFloat(e.target.value);
     paintRanges(e.target.parentElement);
+    bubble(e.target);
     liveChange();
   });
-  panel.addEventListener('change', (e) => { if (e.target.matches('.mc-vol')) endLive(); });
+  panel.addEventListener('change', (e) => { if (e.target.matches('.mc-vol')) { endLive(); hideBubble(); } });
+  ['pointerup', 'pointercancel'].forEach((ev) => panel.addEventListener(ev, () => setTimeout(hideBubble, 350)));
   // Perilla de paneo: arrastra a los lados (o arriba/abajo); doble toque = al centro
   let knob = null, lastTap = 0;
   panel.addEventListener('pointerdown', (e) => {

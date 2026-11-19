@@ -458,3 +458,17 @@ html, body { touch-action: pan-x pan-y; }           /* el navegador no hace zoom
 
 .sheet-head h3 svg.i { display: inline-block; vertical-align: -4px; width: 21px; height: 21px; margin-right: 4px; }
 .toast.top { bottom: auto; top: calc(var(--safe-top) + 64px); }
+
+/* ===== v0.20 · recortar regiones y decibeles del mezclador ===== */
+.r-knob { touch-action: none; cursor: ew-resize; }
+.r-knob::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; } /* más fácil de agarrar con el dedo */
+.r-knob.l { left: -10px; }
+.r-knob.r { left: auto; right: -10px; }
+.region.trimming { z-index: 4; }
+.region.trimming .r-knob { transform: scale(1.15); }
+.db-bubble { position: absolute; bottom: calc(50% + 16px); transform: translateX(-50%) scale(.9); padding: 3px 8px; border-radius: 6px;
+  background: #fff; color: #000; font-size: 12px; font-weight: 700; white-space: nowrap; pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35); opacity: 0; transition: opacity .15s, transform .15s; z-index: 5; font-variant-numeric: tabular-nums; }
+.db-bubble.show { opacity: 1; transform: translateX(-50%) scale(1); }
+.mc-bottom { position: relative; }
+.region.selected { contain: layout; }
