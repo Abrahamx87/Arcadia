@@ -396,10 +396,14 @@ export class Engine {
 
   // ---------- Exportar ----------
   async exportWav(project) {
+    return encodeWav(await this.renderMix(project, 44100));
+  }
+
+  /** La mezcla final (con efectos y master) como AudioBuffer. */
+  async renderMix(project, rate = 44100) {
     await this.loadProject(project);
     const end = projectEnd(project);
     if (end <= 0) throw new Error('El proyecto no tiene audio');
-    const rate = 44100;
     const length = Math.ceil((end + 1.5) * rate);
     const ctx = new OfflineAudioContext(2, length, rate);
     await loadWorklet(ctx);
@@ -421,8 +425,7 @@ export class Engine {
         src.start(r.start, r.offset, Math.min(r.length, buf.duration - r.offset));
       });
     });
-    const rendered = await ctx.startRendering();
-    return encodeWav(rendered);
+    return ctx.startRendering();
   }
 }
 

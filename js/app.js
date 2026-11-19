@@ -1,4 +1,5 @@
 // Arcadia — interfaz de la app (biblioteca + estudio).
+import { makeMp4, videoSupported } from './video.js';
 import * as store from './store.js';
 import { Engine, projectEnd, DEMO } from './engine.js';
 import { EFFECTS, PRESETS, defaultParams } from './effects.js';
@@ -19,7 +20,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.21';
+const VERSION = '0.22';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1725,37 +1726,134 @@ async function toggleRecord() {
 }
 $('#record').addEventListener('click', toggleRecord);
 
+// ---------- Exportar: audio WAV o video MP4 con imagen ----------
+const LOGO_URL = './img/logo.jpg';
+const COVER_ID = 'cover:default';
+/** Imagen predeterminada: la que elegiste, o tu logo si no has elegido ninguna. */
+async function defaultCover() {
+  try { const rec = await store.loadAudio(COVER_ID); if (rec?.blob) return { blob: rec.blob, custom: true }; } catch (e) {}
+  const res = await fetch(LOGO_URL);
+  return { blob: await res.blob(), custom: false };
+}
+function cleanName(ext) { return `${S.project.title.replace(/[\\/:*?"<>|]/g, '').trim() || 'Arcadia'}.${ext}`; }
+
 async function exportSong() {
   if (!projectEnd(S.project)) return toast('Agrega audio antes de exportar');
   if (engine.playing) stopPlayback();
+  openSheet((el) => {
+    el.innerHTML = sheetHead('Exportar canción') + `<div class="sheet-body">
+      <button class="sheet-item" data-a="wav">${icon('ic-download')}<span>Audio WAV<small>La mejor calidad, sin imagen</small></span></button>
+      <button class="sheet-item" data-a="mp4">${icon('ic-film')}<span>Video MP4 con imagen<small>Para Instagram, WhatsApp, YouTube…</small></span></button>
+    </div>`;
+    el.onclick = (e) => {
+      if (e.target.closest('[data-x]')) return closeSheet();
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'wav') exportWavFlow();
+      if (a === 'mp4') coverSheet();
+    };
+  });
+}
+
+async function exportWavFlow() {
+  closeSheet();
   const done = busy('Mezclando tu canción…');
   try {
     const blob = await engine.exportWav(S.project);
-    const fileName = `${S.project.title.replace(/[\\/:*?"<>|]/g, '')}.wav`;
     done();
-    const file = new File([blob], fileName, { type: 'audio/wav' });
-    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
-    openSheet((el) => {
-      el.innerHTML = sheetHead('Tu canción está lista 🎉') + `<div class="sheet-body">
-        <div class="sub" style="margin-bottom:8px">${esc(fileName)} · ${(blob.size / 1048576).toFixed(1)} MB</div>
-        <button class="sheet-item" data-a="dl">${icon('ic-download')}Descargar WAV</button>
-        ${canShare ? `<button class="sheet-item" data-a="share">${icon('ic-share')}Compartir (WhatsApp, Drive…)</button>` : ''}
-      </div>`;
-      el.onclick = async (e) => {
-        if (e.target.closest('[data-x]')) return closeSheet();
-        const a = e.target.closest('[data-a]')?.dataset.a;
-        if (a === 'dl') {
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); link.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 30000);
-        }
-        if (a === 'share') { try { await navigator.share({ files: [file], title: S.project.title }); } catch (err) {} }
-      };
-    });
+    resultSheet(blob, cleanName('wav'), 'audio/wav', 'WAV');
   } catch (err) {
     console.error(err); done(); toast('No se pudo exportar la canción');
   }
+}
+
+/** Elegir la imagen del video: la predeterminada (tu logo) u otra. */
+async function coverSheet() {
+  if (!videoSupported()) return toast('Este navegador no puede crear video. Actualiza Chrome.');
+  const def = await defaultCover();
+  let chosen = def.blob, isOther = false, saveDefault = false;
+  let url = URL.createObjectURL(chosen);
+  const render = (el) => {
+    el.innerHTML = sheetHead('Imagen del video') + `<div class="sheet-body">
+      <div class="cover-prev"><img src="${url}" alt="Imagen del video"></div>
+      <div class="sub cover-note">${isOther ? 'Imagen nueva' : (def.custom ? 'Tu imagen predeterminada' : 'Tu logo (imagen predeterminada)')}</div>
+      <button class="sheet-item" data-a="pick">${icon('ic-image')}Elegir otra imagen</button>
+      ${isOther ? `<label class="sheet-item cover-check"><input type="checkbox" data-a="save" ${saveDefault ? 'checked' : ''}> Usarla como predeterminada desde ahora</label>` : ''}
+      ${!isOther && def.custom ? `<button class="sheet-item" data-a="logo">${icon('ic-undo')}Volver a mi logo</button>` : ''}
+      <div class="sheet-foot"><button class="btn primary" data-a="go">Crear video MP4</button></div>
+    </div>`;
+  };
+  openSheet((el) => {
+    render(el);
+    el.onchange = (e) => { if (e.target.matches('[data-a="save"]')) saveDefault = e.target.checked; };
+    el.onclick = async (e) => {
+      if (e.target.closest('[data-x]')) { URL.revokeObjectURL(url); return closeSheet(); }
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'pick') {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*';
+        inp.onchange = () => {
+          const f = inp.files && inp.files[0];
+          if (!f) return;
+          URL.revokeObjectURL(url);
+          chosen = f; isOther = true; saveDefault = true; url = URL.createObjectURL(f);
+          render(el);
+        };
+        inp.click();
+      }
+      if (a === 'logo') {
+        try { await store.saveAudio(COVER_ID, null, 'logo'); } catch (err) {}
+        const res = await fetch(LOGO_URL); chosen = await res.blob();
+        def.custom = false; URL.revokeObjectURL(url); url = URL.createObjectURL(chosen);
+        render(el); toast('Listo: tu logo vuelve a ser la imagen predeterminada');
+      }
+      if (a === 'go') {
+        if (isOther && saveDefault) { try { await store.saveAudio(COVER_ID, chosen, 'portada'); } catch (err) {} }
+        URL.revokeObjectURL(url);
+        exportMp4Flow(chosen);
+      }
+    };
+  });
+}
+
+async function exportMp4Flow(imageBlob) {
+  closeSheet();
+  const done = busy('Mezclando tu canción…');
+  const say = (t) => { const b = document.querySelector('.busy > div'); if (b) b.lastChild.textContent = t; };
+  try {
+    const img = await createImageBitmap(imageBlob);
+    const mix = await engine.renderMix(S.project, 48000);
+    say('Creando el video… 0 %');
+    const { blob, audioCodec } = await makeMp4(mix, img, (p) => say(`Creando el video… ${Math.round(p * 100)} %`));
+    img.close?.();
+    done();
+    if (audioCodec !== 'aac') console.warn('Audio en Opus: este navegador no tiene AAC');
+    resultSheet(blob, cleanName('mp4'), 'video/mp4', 'MP4');
+  } catch (err) {
+    console.error(err); done(); toast('No se pudo crear el video: ' + (err.message || err));
+  }
+}
+
+function resultSheet(blob, fileName, type, kind) {
+  const file = new File([blob], fileName, { type });
+  const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+  openSheet((el) => {
+    el.innerHTML = sheetHead('Tu canción está lista 🎉') + `<div class="sheet-body">
+      <div class="sub" style="margin-bottom:8px">${esc(fileName)} · ${(blob.size / 1048576).toFixed(1)} MB</div>
+      <button class="sheet-item" data-a="dl">${icon('ic-download')}Descargar ${kind}</button>
+      ${canShare ? `<button class="sheet-item" data-a="share">${icon('ic-share')}Compartir (WhatsApp, Drive…)</button>` : ''}
+    </div>`;
+    el.onclick = async (e) => {
+      if (e.target.closest('[data-x]')) return closeSheet();
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (a === 'dl') {
+        const u = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = u; link.download = fileName; document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(u), 60000);
+      }
+      if (a === 'share') { try { await navigator.share({ files: [file], title: S.project.title }); } catch (err) {} }
+    };
+  });
 }
 
 // =====================================================================
@@ -1801,6 +1899,7 @@ window.addEventListener('pagehide', () => { if (S.project) store.saveProject(S.p
 // =====================================================================
 // Arranque
 // =====================================================================
+(() => { const sp = $('#splash'); if (!sp) return; setTimeout(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 500); }, 1100); })();
 $('#app-version').textContent = 'v' + VERSION;
 (async function init() {
   try { S.projects = await store.loadProjects(); } catch (e) { S.projects = []; }
