@@ -19,7 +19,7 @@ const TYPES = {
   BASS: { label: 'Bajo', icon: 'ic-bass' },
   OTHER: { label: 'Audio', icon: 'ic-wave' },
 };
-const VERSION = '0.20';
+const VERSION = '0.21';
 const SOON = { sync: 'La sincronización con Abraham IA Music llega pronto ☁️' };
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -407,11 +407,13 @@ const regionPeak = new Map();
 let tileObserver = null;
 
 function peakOf(r) {
-  const key = `${r.audioId}|${r.offset}|${r.length}`;
+  // Se mide sobre TODO el audio (no solo el pedazo visible): así, al recortar o estirar,
+  // la onda no cambia de tamaño de golpe.
+  const key = r.audioId;
   if (regionPeak.has(key)) return regionPeak.get(key);
   const pk = engine.peaks.get(r.audioId);
   if (!pk) return 1;
-  const a = Math.floor(r.offset * pk.rate), b = Math.min(pk.min.length, Math.ceil((r.offset + r.length) * pk.rate));
+  const a = 0, b = pk.min.length;
   let m = 0.0001;
   for (let i = a; i < b; i++) m = Math.max(m, pk.max[i], -pk.min[i]);
   regionPeak.set(key, m);
@@ -853,7 +855,33 @@ function startTrim(e, knob) {
     moved: false, next: { start: r.start, offset: r.offset, length: r.length } };
   knob.setPointerCapture(e.pointerId);
   el.classList.add('trimming');
+  fullWaveTiles(el, found.track, r, dur);
   return true;
+}
+/** Al empezar a estirar, se dibuja la onda de TODO el audio (también lo escondido), para que
+ *  al destaparlo se vea en tiempo real y no en blanco. Lo que no se ve queda recortado. */
+function fullWaveTiles(el, track, r, dur) {
+  if (!engine.peaks.has(r.audioId)) return;
+  const scale = pps();
+  const full = { ...r, offset: 0, length: dur };
+  const wfull = Math.max(3, dur * scale);
+  el.querySelectorAll('canvas').forEach((c) => c.remove());
+  const tl = $('#timeline');
+  const viewL = tl.scrollLeft - 200, viewR = tl.scrollLeft + tl.clientWidth + 200;
+  tileViewX = tl.scrollLeft + tl.clientWidth / 2;
+  const now = [];
+  for (let x0 = 0; x0 < wfull; x0 += TILE) {
+    const cv = document.createElement('canvas');
+    cv.width = 1; cv.height = 1;
+    const tw = Math.min(TILE, wfull - x0);
+    cv._wave = { r: full, color: track.color, x0, tw, w: wfull };
+    cv._gx = (r.start - r.offset) * scale + x0 + headerW() + lead(); // posición en la pantalla de scroll
+    cv.style.width = tw + 'px';
+    el.appendChild(cv);
+    if (cv._gx + tw > viewL && cv._gx < viewR) now.push(cv); else queueTile(cv);
+  }
+  clipCanvases(el, r.offset * scale, Math.max(3, r.length * scale));
+  now.forEach(drawTile);
 }
 function moveTrim(e) {
   const t = trim, scale = pps();
@@ -880,7 +908,7 @@ function moveTrim(e) {
   const w = Math.max(3, t.next.length * scale);
   t.el.style.left = t.next.start * scale + 'px';
   t.el.style.width = w + 'px';
-  clipCanvases(t.el, (t.next.offset - t.offset) * scale, w);
+  clipCanvases(t.el, t.next.offset * scale, w);
 }
 function endTrim() {
   const t = trim;
